@@ -1,0 +1,88 @@
+package session
+
+import (
+	"errors"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+)
+
+// Session represents a running session, compatible with the TUI's Session type.
+type Session struct {
+	Name         string
+	PID          string
+	Clients      int
+	StartedIn    string
+	Cmd          string
+	Memory       uint64 // filled later by process info
+	Uptime       int    // filled later by process info
+	CreatedAt    uint64
+	TaskEndedAt  uint64
+	TaskExitCode uint8
+}
+
+// DisplayDir returns StartedIn with $HOME replaced by ~.
+func (s Session) DisplayDir() string {
+	home, _ := os.UserHomeDir()
+	if home != "" && strings.HasPrefix(s.StartedIn, home) {
+		return "~" + s.StartedIn[len(home):]
+	}
+	return s.StartedIn
+}
+
+// ListSessions discovers sessions by probing socket files in the socket directory.
+func ListSessions(cfg Config) ([]Session, error) {
+	entries, err := os.ReadDir(cfg.SocketDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var sessions []Session
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		path := cfg.SocketPath(entry.Name())
+		if !IsSocket(path) {
+			continue
+		}
+
+		info, err := ProbeSession(path)
+		if err != nil {
+			// Connection refused means the daemon is dead — clean up the stale socket.
+			var opErr *net.OpError
+			if errors.As(err, &opErr) {
+				CleanStaleSocket(path)
+			}
+			continue
+		}
+
+		sessions = append(sessions, Session{
+			Name:         entry.Name(),
+			PID:          strconv.Itoa(int(info.PID)),
+			Clients:      int(info.ClientsLen),
+			StartedIn:    info.CwdString(),
+			Cmd:          info.CmdString(),
+			CreatedAt:    info.CreatedAt,
+			TaskEndedAt:  info.TaskEndedAt,
+			TaskExitCode: info.TaskExitCode,
+		})
+	}
+
+	return sessions, nil
+}
+
+// KillSession sends a kill message to the named session.
+func KillSession(cfg Config, name string) error {
+	path := cfg.SocketPath(name)
+	conn, err := Connect(path)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	return SendMessage(conn, TagKill, nil)
+}
