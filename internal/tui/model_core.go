@@ -9,8 +9,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/mattn/go-runewidth"
 	"github.com/adibhanna/tsm/internal/engine"
+	"github.com/mattn/go-runewidth"
 )
 
 const (
@@ -116,7 +116,6 @@ func killOneCmd(name string) tea.Cmd {
 		return killOneResultMsg{name: name, err: err}
 	}
 }
-
 
 func clearStatusAfter(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg {
@@ -424,7 +423,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	return m, nil
 }
-
 
 func (m *Model) previewCmd() tea.Cmd {
 	visible := m.visibleSessions()

@@ -7,7 +7,7 @@ import (
 
 func TestDaemonStartAndProbe(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("ZMX_DIR", dir)
+	t.Setenv("TSM_DIR", dir)
 
 	cfg := DefaultConfig()
 	name := "test-daemon"

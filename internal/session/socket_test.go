@@ -33,12 +33,12 @@ func TestProbeSessionIntegration(t *testing.T) {
 
 		// Build an Info response
 		payload := make([]byte, InfoSize)
-		binary.LittleEndian.PutUint64(payload[0:8], 2)       // clients
+		binary.LittleEndian.PutUint64(payload[0:8], 2)        // clients
 		binary.LittleEndian.PutUint32(payload[8:12], 99999)   // pid
 		binary.LittleEndian.PutUint16(payload[12:14], 3)      // cmd_len
 		binary.LittleEndian.PutUint16(payload[14:16], 4)      // cwd_len
-		copy(payload[16:], "zsh")                              // cmd
-		copy(payload[272:], "/tmp")                            // cwd
+		copy(payload[16:], "zsh")                             // cmd
+		copy(payload[272:], "/tmp")                           // cwd
 		binary.LittleEndian.PutUint64(payload[528:536], 5000) // created_at
 
 		resp := MarshalMessage(TagInfo, payload)

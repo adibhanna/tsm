@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattn/go-runewidth"
 	"github.com/adibhanna/tsm/internal/session"
+	"github.com/mattn/go-runewidth"
 )
 
 // FetchPreview returns the last `lines` lines of a session's scrollback,
