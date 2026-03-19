@@ -703,7 +703,7 @@ if [[ -n "${TSM_SESSION:-}" ]]; then
     _tsm_apply_prompt_marker
     print -Pn -- "\e]2;tsm:${TSM_SESSION} %~\a"
   }
-  if (( ${precmd_functions[(Ie)_tsm_precmd_title]} == 0 )); then
+  if (( ${precmd_functions[(Ie)_tsm_precmd_title]:-0} == 0 )); then
     add-zsh-hook precmd _tsm_precmd_title
   fi
   _tsm_precmd_title

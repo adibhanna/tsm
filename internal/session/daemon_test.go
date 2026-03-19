@@ -1,6 +1,7 @@
 package session
 
 import (
+	"os/exec"
 	"os"
 	"path/filepath"
 	"strings"
@@ -240,6 +241,38 @@ toggle = "ctrl+g"
 	}
 	if !strings.Contains(text, "bindkey '^G' _tsm_session_toggle") {
 		t.Fatalf("expected configured toggle bind, got %q", text)
+	}
+}
+
+func TestBuildDaemonEnvGeneratedZshRcHandlesEmptyPrecmdFunctions(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh not available")
+	}
+
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	if err := os.MkdirAll(home, 0750); err != nil {
+		t.Fatalf("mkdir home: %v", err)
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv("TSM_DIR", dir)
+
+	cfg := DefaultConfig()
+	env, err := buildDaemonEnv(cfg, "demo", zsh, nil)
+	if err != nil {
+		t.Fatalf("buildDaemonEnv: %v", err)
+	}
+
+	cmd := exec.Command(zsh, "-fc", `typeset -ga precmd_functions; precmd_functions=(); source "$ZDOTDIR/.zshrc"; print ok`)
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("source generated .zshrc: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "ok") {
+		t.Fatalf("unexpected zsh output: %q", out)
 	}
 }
 

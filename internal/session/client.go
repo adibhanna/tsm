@@ -32,10 +32,11 @@ func isDetachKey(data []byte) bool {
 		bytes.Contains(data, kittyCtrlBackslashExt)
 }
 
-// Terminal reset sequences sent on detach (mirrors zmx).
-// Disables mouse tracking, bracketed paste, focus events, alt screen; shows cursor.
+// Terminal reset sequences sent before attach and on detach.
+// Disables mouse tracking, bracketed paste, focus events, keyboard enhancement
+// modes, alt screen; shows cursor.
 const termResetSeq = "\033[?1000l\033[?1002l\033[?1003l\033[?1006l" +
-	"\033[?2004l\033[?1004l\033[?1049l" +
+	"\033[?2004l\033[?1004l\033[>4m\033[=0;1u\033[?1049l" +
 	"\033[?25h" +
 	"\033[0m"
 
@@ -67,7 +68,8 @@ func Attach(cfg Config, name string) error {
 	signal.Ignore(syscall.SIGQUIT)
 	defer signal.Reset(syscall.SIGQUIT)
 
-	// Clear screen so the SIGWINCH redraw lands on a clean slate.
+	// Start from a known local terminal state before replaying the session.
+	os.Stdout.WriteString(termResetSeq)
 	os.Stdout.WriteString("\033[2J\033[H")
 
 	// Send Init — daemon bounces PTY size → SIGWINCH → app redraws.

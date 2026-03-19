@@ -1,6 +1,9 @@
 package session
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestIsDetachKey(t *testing.T) {
 	tests := []struct {
@@ -18,5 +21,14 @@ func TestIsDetachKey(t *testing.T) {
 		if got := isDetachKey(tt.data); got != tt.want {
 			t.Fatalf("%s: isDetachKey(%q) = %v, want %v", tt.name, tt.data, got, tt.want)
 		}
+	}
+}
+
+func TestTermResetSeqDisablesKeyboardEnhancements(t *testing.T) {
+	if !bytes.Contains([]byte(termResetSeq), []byte("\x1b[>4m")) {
+		t.Fatalf("termResetSeq missing modifyOtherKeys reset: %q", termResetSeq)
+	}
+	if !bytes.Contains([]byte(termResetSeq), []byte("\x1b[=0;1u")) {
+		t.Fatalf("termResetSeq missing kitty keyboard reset: %q", termResetSeq)
 	}
 }
