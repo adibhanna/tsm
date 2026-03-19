@@ -12,8 +12,9 @@ import (
 const DefaultConfigPathEnv = "TSM_CONFIG_FILE"
 
 type Config struct {
-	Path string
-	TUI  TUIConfig
+	Path  string
+	TUI   TUIConfig
+	Shell ShellConfig
 }
 
 type TUIConfig struct {
@@ -23,8 +24,19 @@ type TUIConfig struct {
 	Keymaps  map[string]map[string][]string
 }
 
+type ShellConfig struct {
+	Shortcuts ShellShortcutConfig
+}
+
+type ShellShortcutConfig struct {
+	Full    *string
+	Palette *string
+	Toggle  *string
+}
+
 type fileConfig struct {
-	TUI fileTUIConfig `toml:"tui"`
+	TUI   fileTUIConfig   `toml:"tui"`
+	Shell fileShellConfig `toml:"shell"`
 }
 
 type fileTUIConfig struct {
@@ -37,6 +49,16 @@ type fileTUIConfig struct {
 type fileKeymapConfig struct {
 	Default map[string][]string `toml:"default"`
 	Palette map[string][]string `toml:"palette"`
+}
+
+type fileShellConfig struct {
+	Shortcuts fileShellShortcutConfig `toml:"shortcuts"`
+}
+
+type fileShellShortcutConfig struct {
+	Full    *string `toml:"full"`
+	Palette *string `toml:"palette"`
+	Toggle  *string `toml:"toggle"`
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -73,6 +95,18 @@ func Load(getenv func(string) string) (Config, error) {
 	cfg.TUI.ShowHelp = raw.TUI.ShowHelp
 	cfg.TUI.Keymaps["default"] = cloneKeymap(raw.TUI.Keymaps.Default)
 	cfg.TUI.Keymaps["palette"] = cloneKeymap(raw.TUI.Keymaps.Palette)
+	if raw.Shell.Shortcuts.Full != nil {
+		value := strings.TrimSpace(*raw.Shell.Shortcuts.Full)
+		cfg.Shell.Shortcuts.Full = &value
+	}
+	if raw.Shell.Shortcuts.Palette != nil {
+		value := strings.TrimSpace(*raw.Shell.Shortcuts.Palette)
+		cfg.Shell.Shortcuts.Palette = &value
+	}
+	if raw.Shell.Shortcuts.Toggle != nil {
+		value := strings.TrimSpace(*raw.Shell.Shortcuts.Toggle)
+		cfg.Shell.Shortcuts.Toggle = &value
+	}
 	return cfg, nil
 }
 

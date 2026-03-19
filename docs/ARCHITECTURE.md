@@ -180,7 +180,8 @@ Each shim provides:
 - terminal title updates
 - `$TSM_SESSION`
 - `$TSM_SHELL_INTEGRATION`
-- `Ctrl+P` binding to open the simplified palette
+- `Ctrl+[` binding to open the full TUI
+- `Ctrl+]` binding to open the simplified palette
 
 The integration is session-local. Fresh sessions pick up the current integration logic. Existing running sessions keep the shell environment they started with.
 
@@ -239,6 +240,7 @@ Supported config behaviors:
 - choose default keymap: `default` or `palette`
 - hide help: `show_help = false`
 - override bindings per action under `[tui.keymaps.default]` and `[tui.keymaps.palette]`
+- configure integrated shell shortcuts under `[shell.shortcuts]`
 
 ## Local Session Switch
 

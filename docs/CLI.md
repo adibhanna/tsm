@@ -256,6 +256,11 @@ move_up = ["k"]
 move_down = ["j"]
 detach = ["x"]
 toggle_layout = ["ctrl+o"]
+
+[shell.shortcuts]
+full = "ctrl+["
+palette = "ctrl+]"
+toggle = ""
 ```
 
 Config precedence:
@@ -290,7 +295,10 @@ Supported action names:
 
 ## Shell Shortcuts
 
-Inside fresh TSM-managed interactive shells, `Ctrl+P` opens the simplified palette by default.
+Inside fresh TSM-managed interactive shells:
+
+- `Ctrl+[` opens the full TUI
+- `Ctrl+]` opens the simplified palette
 
 Supported integrated shells:
 
@@ -321,7 +329,7 @@ tsm_palette() {
 bind -x '"\C-g":tsm_palette'
 ```
 
-`Ctrl+G` is recommended for the global shell shortcut because it avoids clobbering the common shell-history meaning of `Ctrl+P`.
+`Ctrl+G` is still a reasonable global shell shortcut because it stays out of the built-in `Ctrl+[` / `Ctrl+]` TSM shell chords.
 
 ## Useful Checks
 

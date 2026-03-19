@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,6 +131,95 @@ func TestResolveKillTargetsPrefersExplicitNames(t *testing.T) {
 	got := resolveKillTargets([]string{"tsm", "kill", "one", "two"})
 	if len(got) != 2 || got[0] != "one" || got[1] != "two" {
 		t.Fatalf("resolveKillTargets = %#v, want [one two]", got)
+	}
+}
+
+func TestMarkSessionFocusedTracksCurrentAndPrevious(t *testing.T) {
+	cfg := session.Config{SocketDir: t.TempDir()}
+	if err := markSessionFocused(cfg, "alpha", ""); err != nil {
+		t.Fatalf("markSessionFocused alpha: %v", err)
+	}
+	if err := markSessionFocused(cfg, "beta", ""); err != nil {
+		t.Fatalf("markSessionFocused beta: %v", err)
+	}
+
+	state, err := loadFocusState(cfg)
+	if err != nil {
+		t.Fatalf("loadFocusState: %v", err)
+	}
+	if state.Current != "beta" || state.Previous != "alpha" {
+		t.Fatalf("state = %+v, want current beta previous alpha", state)
+	}
+}
+
+func TestResolveToggleTargetUsesPreviousWhenInsideCurrent(t *testing.T) {
+	cfg := session.Config{SocketDir: t.TempDir()}
+	if err := saveFocusState(cfg, focusState{Current: "beta", Previous: "alpha"}); err != nil {
+		t.Fatalf("saveFocusState: %v", err)
+	}
+
+	origList := listSessionsForFocus
+	t.Cleanup(func() { listSessionsForFocus = origList })
+	listSessionsForFocus = func(session.Config) ([]session.Session, error) {
+		return []session.Session{{Name: "alpha"}, {Name: "beta"}}, nil
+	}
+
+	target, err := resolveToggleTarget(cfg, "beta")
+	if err != nil {
+		t.Fatalf("resolveToggleTarget: %v", err)
+	}
+	if target != "alpha" {
+		t.Fatalf("target = %q, want alpha", target)
+	}
+}
+
+func TestRemoveFocusSessionDropsKilledSession(t *testing.T) {
+	cfg := session.Config{SocketDir: t.TempDir()}
+	if err := saveFocusState(cfg, focusState{Current: "beta", Previous: "alpha"}); err != nil {
+		t.Fatalf("saveFocusState: %v", err)
+	}
+	if err := removeFocusSession(cfg, "beta"); err != nil {
+		t.Fatalf("removeFocusSession: %v", err)
+	}
+	state, err := loadFocusState(cfg)
+	if err != nil {
+		t.Fatalf("loadFocusState: %v", err)
+	}
+	if state.Current != "alpha" || state.Previous != "" {
+		t.Fatalf("state = %+v, want current alpha previous empty", state)
+	}
+}
+
+func TestLoadFocusStateHandlesEmptyFile(t *testing.T) {
+	cfg := session.Config{SocketDir: t.TempDir()}
+	if err := os.WriteFile(focusStatePath(cfg), nil, 0o640); err != nil {
+		t.Fatalf("write focus file: %v", err)
+	}
+	state, err := loadFocusState(cfg)
+	if err != nil {
+		t.Fatalf("loadFocusState: %v", err)
+	}
+	if state != (focusState{}) {
+		t.Fatalf("state = %+v, want zero value", state)
+	}
+}
+
+func TestSaveFocusStateWritesJSON(t *testing.T) {
+	cfg := session.Config{SocketDir: t.TempDir()}
+	want := focusState{Current: "beta", Previous: "alpha"}
+	if err := saveFocusState(cfg, want); err != nil {
+		t.Fatalf("saveFocusState: %v", err)
+	}
+	data, err := os.ReadFile(focusStatePath(cfg))
+	if err != nil {
+		t.Fatalf("read focus file: %v", err)
+	}
+	var got focusState
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal focus json: %v", err)
+	}
+	if got != want {
+		t.Fatalf("focus json = %+v, want %+v", got, want)
 	}
 }
 

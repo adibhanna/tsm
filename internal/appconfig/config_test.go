@@ -57,6 +57,11 @@ detach = ["x"]
 
 [tui.keymaps.palette]
 copy_command = ["ctrl+k"]
+
+[shell.shortcuts]
+full = "ctrl+["
+palette = "ctrl+l"
+toggle = "ctrl+]"
 `
 	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -86,6 +91,15 @@ copy_command = ["ctrl+k"]
 	}
 	if got := cfg.TUI.Keymaps["palette"]["copy_command"]; len(got) != 1 || got[0] != "ctrl+k" {
 		t.Fatalf("palette copy bindings = %#v, want [ctrl+k]", got)
+	}
+	if cfg.Shell.Shortcuts.Palette == nil || *cfg.Shell.Shortcuts.Palette != "ctrl+l" {
+		t.Fatalf("cfg.Shell.Shortcuts.Palette = %#v, want ctrl+l", cfg.Shell.Shortcuts.Palette)
+	}
+	if cfg.Shell.Shortcuts.Full == nil || *cfg.Shell.Shortcuts.Full != "ctrl+[" {
+		t.Fatalf("cfg.Shell.Shortcuts.Full = %#v, want ctrl+[", cfg.Shell.Shortcuts.Full)
+	}
+	if cfg.Shell.Shortcuts.Toggle == nil || *cfg.Shell.Shortcuts.Toggle != "ctrl+]" {
+		t.Fatalf("cfg.Shell.Shortcuts.Toggle = %#v, want ctrl+]", cfg.Shell.Shortcuts.Toggle)
 	}
 }
 
@@ -125,7 +139,7 @@ func TestInstallDefaultWritesTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read installed config: %v", err)
 	}
-	if !strings.Contains(string(data), "[tui.keymaps.default]") {
+	if !strings.Contains(string(data), "[tui.keymaps.default]") || !strings.Contains(string(data), "[shell.shortcuts]") {
 		t.Fatalf("installed config missing expected template contents: %q", string(data))
 	}
 }

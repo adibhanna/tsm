@@ -54,6 +54,8 @@ func main() {
 		cmdConfig()
 	case "attach", "a":
 		cmdAttach()
+	case "toggle", "last", "prev":
+		cmdToggle()
 	case "detach", "d":
 		cmdDetach()
 	case "new", "n":
@@ -127,6 +129,32 @@ func cmdAttach() {
 	fmt.Fprintf(os.Stdout, "\r\n[detached from %s]\r\n", name)
 }
 
+func cmdToggle() {
+	cfg := session.DefaultConfig()
+	current := os.Getenv("TSM_SESSION")
+	target, err := resolveToggleTarget(cfg, current)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Toggle error: %v\n", err)
+		os.Exit(1)
+	}
+	if switched := emitLocalSwitchRequest(target); switched {
+		return
+	}
+	if err := attachSession(cfg, target, false); err != nil {
+		var switchErr *session.SwitchSessionError
+		if errors.As(err, &switchErr) {
+			if err := execAttachTarget(switchErr.Target); err != nil {
+				fmt.Fprintf(os.Stderr, "Switch error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Attach error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stdout, "\r\n[detached from %s]\r\n", target)
+}
+
 func cmdConfig() {
 	if len(os.Args) < 3 {
 		printConfigUsage()
@@ -165,6 +193,7 @@ func emitLocalSwitchRequest(target string) bool {
 	if current == target {
 		return true
 	}
+	_ = markSessionFocused(session.DefaultConfig(), target, current)
 	fmt.Fprint(os.Stdout, session.AttachSwitchSequence(target))
 	return true
 }
@@ -212,6 +241,9 @@ func attachSession(cfg session.Config, name string, createIfMissing bool) error 
 				return fmt.Errorf("create session %q: %w", name, err)
 			}
 		}
+	}
+	if err := markSessionFocused(cfg, name, os.Getenv("TSM_SESSION")); err != nil {
+		return fmt.Errorf("record focus: %w", err)
 	}
 	return session.Attach(cfg, name)
 }
@@ -372,6 +404,7 @@ func cmdKill() {
 			failed = true
 			continue
 		}
+		_ = removeFocusSession(cfg, name)
 		fmt.Printf("Session %q killed\n", name)
 	}
 	if failed {
@@ -494,6 +527,7 @@ func launchTUI(opts tui.Options) {
 		AttachTarget() string
 	}
 	if m, ok := finalModel.(attachTargeter); ok && m.AttachTarget() != "" {
+		_ = markSessionFocused(session.DefaultConfig(), m.AttachTarget(), os.Getenv("TSM_SESSION"))
 		if err := runAttachTarget(m.AttachTarget()); err != nil {
 			fmt.Fprintf(os.Stderr, "Attach error: %v\n", err)
 			os.Exit(1)
@@ -511,6 +545,7 @@ Usage:
   tsm palette              Open simplified session palette
   tsm config install       Install default config into ~/.config/tsm/config.toml
   tsm attach [name]        Attach to session (smart attach if omitted)
+  tsm toggle               Switch to the previous session
   tsm detach [name]        Detach current or named session
   tsm new <name> [cmd...]  Create a new session
   tsm list                 List active sessions

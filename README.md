@@ -48,10 +48,10 @@ Do not expect `tsm` to manage splits. Splits belong to your shell app or your te
 
 There are two supported install tracks.
 
-| Install path | Backend | Best for |
-| --- | --- | --- |
+| Install path    | Backend         | Best for                                         |
+| --------------- | --------------- | ------------------------------------------------ |
 | Release archive | `libghostty-vt` | Best restore quality, recommended for most users |
-| Homebrew | `libghostty-vt` | Managed installs and upgrades |
+| Homebrew        | `libghostty-vt` | Managed installs and upgrades                    |
 
 ### Release archive
 
@@ -274,24 +274,24 @@ The full TUI is the best workflow when you want:
 
 ### Full TUI default keys
 
-| Key | Action |
-| --- | --- |
-| `↑` `↓` | Navigate sessions |
-| `←` `→` | Scroll preview |
-| `space` | Toggle selection |
-| `ctrl+a` | Select or deselect all |
-| `enter` | Attach |
-| `d` | Detach selected session(s) |
-| `n` | New session |
-| `k` | Kill selected session(s) |
-| `r` | Rename session |
-| `c` | Copy attach command |
-| `s` | Cycle sort mode |
+| Key      | Action                          |
+| -------- | ------------------------------- |
+| `↑` `↓`  | Navigate sessions               |
+| `←` `→`  | Scroll preview                  |
+| `space`  | Toggle selection                |
+| `ctrl+a` | Select or deselect all          |
+| `enter`  | Attach                          |
+| `d`      | Detach selected session(s)      |
+| `n`      | New session                     |
+| `k`      | Kill selected session(s)        |
+| `r`      | Rename session                  |
+| `c`      | Copy attach command             |
+| `s`      | Cycle sort mode                 |
 | `ctrl+o` | Toggle full / simplified layout |
-| `/` | Filter |
-| `[` `]` | Scroll activity log |
-| `ctrl+r` | Refresh |
-| `q` | Quit |
+| `/`      | Filter                          |
+| `[` `]`  | Scroll activity log             |
+| `ctrl+r` | Refresh                         |
+| `q`      | Quit                            |
 
 ## Simplified Palette
 
@@ -321,22 +321,22 @@ When TSM detects a live `codex` or `claude` process inside a session, both TUI l
 
 ### Shared default keymap
 
-| Key | Action |
-| --- | --- |
-| `↑` `↓` | Navigate |
-| `space` | Toggle selection |
-| `ctrl+a` | Select or deselect all |
-| `enter` | Attach |
-| `d` | Detach |
-| `n` | New session |
-| `k` | Kill |
-| `r` | Rename |
-| `c` | Copy attach command |
-| `s` | Cycle sort mode |
+| Key      | Action                          |
+| -------- | ------------------------------- |
+| `↑` `↓`  | Navigate                        |
+| `space`  | Toggle selection                |
+| `ctrl+a` | Select or deselect all          |
+| `enter`  | Attach                          |
+| `d`      | Detach                          |
+| `n`      | New session                     |
+| `k`      | Kill                            |
+| `r`      | Rename                          |
+| `c`      | Copy attach command             |
+| `s`      | Cycle sort mode                 |
 | `ctrl+o` | Toggle full / simplified layout |
-| `/` | Filter |
-| `ctrl+r` | Refresh |
-| `q` | Quit |
+| `/`      | Filter                          |
+| `ctrl+r` | Refresh                         |
+| `q`      | Quit                            |
 
 ### Palette keymap
 
@@ -348,22 +348,22 @@ tsm tui --simplified --keymap palette
 
 The `palette` keymap applies identically to both layouts.
 
-| Key | Action |
-| --- | --- |
-| `type` | Filter sessions immediately |
-| `↑` `↓` | Navigate |
-| `tab` | Toggle selection |
-| `ctrl+a` | Select all |
-| `enter` | Attach |
-| `ctrl+d` | Detach |
-| `ctrl+t` | New session |
-| `ctrl+x` | Kill |
-| `r` | Rename |
-| `ctrl+y` | Copy attach command |
-| `ctrl+s` | Cycle sort mode |
-| `ctrl+o` | Toggle layout |
-| `ctrl+r` | Refresh |
-| `ctrl+c` | Quit |
+| Key      | Action                      |
+| -------- | --------------------------- |
+| `type`   | Filter sessions immediately |
+| `↑` `↓`  | Navigate                    |
+| `tab`    | Toggle selection            |
+| `ctrl+a` | Select all                  |
+| `enter`  | Attach                      |
+| `ctrl+d` | Detach                      |
+| `ctrl+t` | New session                 |
+| `ctrl+x` | Kill                        |
+| `r`      | Rename                      |
+| `ctrl+y` | Copy attach command         |
+| `ctrl+s` | Cycle sort mode             |
+| `ctrl+o` | Toggle layout               |
+| `ctrl+r` | Refresh                     |
+| `ctrl+c` | Quit                        |
 
 While the palette keymap is active:
 
@@ -373,15 +373,16 @@ While the palette keymap is active:
 
 ## Quick Session Shortcuts
 
-Inside fresh TSM-managed interactive shells, `Ctrl+P` opens the simplified palette by default.
+Inside fresh TSM-managed interactive shells:
+
+- `Ctrl+[` opens the full TUI
+- `Ctrl+]` opens the simplified palette
 
 This is provided for:
 
 - `zsh`
 - `bash`
 - `fish`
-
-That does override the usual shell-history meaning of `Ctrl+P` at the prompt.
 
 If you want a global shortcut from any shell, add this to your shell config instead.
 
@@ -455,6 +456,11 @@ move_down = ["j"]
 attach = ["enter"]
 detach = ["x"]
 toggle_layout = ["ctrl+o"]
+
+[shell.shortcuts]
+full = "ctrl+["
+palette = "ctrl+]"
+toggle = ""
 ```
 
 Supported action names:
@@ -498,7 +504,8 @@ What it provides:
 - terminal title updates
 - `$TSM_SESSION`
 - `$TSM_SHELL_INTEGRATION`
-- `Ctrl+P` opens the simplified palette
+- `Ctrl+[` opens the full TUI
+- `Ctrl+]` opens the simplified palette
 
 This integration is applied to fresh sessions started with the current binary. Existing already-running sessions keep the shell environment they started with.
 
@@ -539,15 +546,15 @@ Automated Homebrew publishing expects:
 
 ## Environment Variables
 
-| Variable | Purpose |
-| --- | --- |
-| `TSM_DIR` | Override the socket directory |
-| `TSM_SESSION` | Current session name inside attached shells |
+| Variable                | Purpose                                          |
+| ----------------------- | ------------------------------------------------ |
+| `TSM_DIR`               | Override the socket directory                    |
+| `TSM_SESSION`           | Current session name inside attached shells      |
 | `TSM_SHELL_INTEGRATION` | Shell integration mode: `zsh`, `bash`, or `fish` |
-| `TSM_TUI_MODE` | Default TUI mode: `full` or `simplified` |
-| `TSM_TUI_KEYMAP` | Default TUI keymap: `default` or `palette` |
-| `TSM_CONFIG_FILE` | Override config file path |
-| `SHELL` | Default shell used for new sessions |
+| `TSM_TUI_MODE`          | Default TUI mode: `full` or `simplified`         |
+| `TSM_TUI_KEYMAP`        | Default TUI keymap: `default` or `palette`       |
+| `TSM_CONFIG_FILE`       | Override config file path                        |
+| `SHELL`                 | Default shell used for new sessions              |
 
 ## License
 

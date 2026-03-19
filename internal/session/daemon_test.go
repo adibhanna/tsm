@@ -121,8 +121,11 @@ func TestBuildDaemonEnvAddsZshIntegration(t *testing.T) {
 		t.Fatalf("read generated .zshrc: %v", err)
 	}
 	text := string(content)
-	if !strings.Contains(text, "bindkey '^P' _tsm_session_palette") {
-		t.Fatalf("generated .zshrc missing Ctrl+P palette binding: %q", text)
+	if !strings.Contains(text, "bindkey '\\e[91;5u' _tsm_session_full") {
+		t.Fatalf("generated .zshrc missing Ghostty Ctrl+[ full binding: %q", text)
+	}
+	if !strings.Contains(text, "bindkey '^]' _tsm_session_palette") {
+		t.Fatalf("generated .zshrc missing Ctrl+] palette binding: %q", text)
 	}
 	if !strings.Contains(text, "_tsm_refresh_session_name") {
 		t.Fatalf("generated .zshrc missing dynamic session refresh: %q", text)
@@ -151,8 +154,11 @@ func TestBuildDaemonEnvAddsBashIntegration(t *testing.T) {
 		t.Fatalf("read generated bash rc: %v", err)
 	}
 	text := string(content)
-	if !strings.Contains(text, `bind -x '"\C-p":"tsm p"'`) {
-		t.Fatalf("generated bash rc missing Ctrl+P palette binding: %q", text)
+	if !strings.Contains(text, `bind -x '"\e[91;5u":"tsm tui"'`) {
+		t.Fatalf("generated bash rc missing Ghostty Ctrl+[ full binding: %q", text)
+	}
+	if !strings.Contains(text, `bind -x '"\C-]":"tsm p"'`) {
+		t.Fatalf("generated bash rc missing Ctrl+] palette binding: %q", text)
 	}
 	if got := values["TSM_SESSION_FILE"]; got != sessionNameFilePath(cfg, "bash", "demo") {
 		t.Fatalf("TSM_SESSION_FILE = %q, want %q", got, sessionNameFilePath(cfg, "bash", "demo"))
@@ -189,8 +195,106 @@ func TestBuildDaemonEnvAddsFishIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated fish config: %v", err)
 	}
-	if !strings.Contains(string(content), `bind \cp __tsm_session_palette`) {
-		t.Fatalf("generated fish config missing Ctrl+P palette binding: %q", string(content))
+	if !strings.Contains(string(content), `bind \e\[91\;5u __tsm_session_full`) {
+		t.Fatalf("generated fish config missing Ghostty Ctrl+[ full binding: %q", string(content))
+	}
+	if !strings.Contains(string(content), `bind \c] __tsm_session_palette`) {
+		t.Fatalf("generated fish config missing Ctrl+] palette binding: %q", string(content))
+	}
+}
+
+func TestBuildDaemonEnvUsesConfiguredShellShortcuts(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[shell.shortcuts]
+full = "ctrl+["
+palette = "ctrl+l"
+toggle = "ctrl+g"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("TSM_CONFIG_FILE", configPath)
+
+	cfg := Config{SocketDir: t.TempDir()}
+	env, err := buildDaemonEnv(cfg, "demo", "/bin/zsh", nil)
+	if err != nil {
+		t.Fatalf("buildDaemonEnv: %v", err)
+	}
+
+	values := map[string]string{}
+	for _, kv := range env {
+		key, value, _ := strings.Cut(kv, "=")
+		values[key] = value
+	}
+	content, err := os.ReadFile(filepath.Join(values["ZDOTDIR"], ".zshrc"))
+	if err != nil {
+		t.Fatalf("read generated .zshrc: %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, "bindkey '^L' _tsm_session_palette") {
+		t.Fatalf("expected configured palette bind, got %q", text)
+	}
+	if !strings.Contains(text, "bindkey '\\e[91;5u' _tsm_session_full") {
+		t.Fatalf("expected configured full bind, got %q", text)
+	}
+	if !strings.Contains(text, "bindkey '^G' _tsm_session_toggle") {
+		t.Fatalf("expected configured toggle bind, got %q", text)
+	}
+}
+
+func TestBuildDaemonEnvCanDisableShellShortcut(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[shell.shortcuts]
+full = ""
+palette = ""
+toggle = "ctrl+]"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("TSM_CONFIG_FILE", configPath)
+
+	cfg := Config{SocketDir: t.TempDir()}
+	env, err := buildDaemonEnv(cfg, "demo", "/bin/bash", nil)
+	if err != nil {
+		t.Fatalf("buildDaemonEnv: %v", err)
+	}
+
+	values := map[string]string{}
+	for _, kv := range env {
+		key, value, _ := strings.Cut(kv, "=")
+		values[key] = value
+	}
+	content, err := os.ReadFile(bashRcFilePath(cfg, "demo"))
+	if err != nil {
+		t.Fatalf("read generated bash rc: %v", err)
+	}
+	text := string(content)
+	if strings.Contains(text, `tsm p`) || strings.Contains(text, `tsm tui`) {
+		t.Fatalf("expected full/palette shortcuts to be disabled, got %q", text)
+	}
+	if !strings.Contains(text, `bind -x '"\C-]":"tsm toggle"'`) {
+		t.Fatalf("expected toggle shortcut to remain enabled, got %q", text)
+	}
+	_ = values
+}
+
+func TestBuildDaemonEnvRejectsInvalidShellShortcut(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[shell.shortcuts]
+toggle = "ctrl+pp"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("TSM_CONFIG_FILE", configPath)
+
+	cfg := Config{SocketDir: t.TempDir()}
+	if _, err := buildDaemonEnv(cfg, "demo", "/bin/zsh", nil); err == nil {
+		t.Fatal("expected invalid shell shortcut to fail")
 	}
 }
 

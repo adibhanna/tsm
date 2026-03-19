@@ -12,8 +12,10 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 	"unsafe"
 
+	"github.com/adibhanna/tsm/internal/appconfig"
 	"github.com/creack/pty/v2"
 )
 
@@ -503,6 +505,10 @@ func resolveShellArgs(cfg Config, name, shell string, shellCmd []string) ([]stri
 }
 
 func buildDaemonEnv(cfg Config, name, shell string, shellCmd []string) ([]string, error) {
+	shortcuts, err := loadShellShortcuts(os.Getenv)
+	if err != nil {
+		return nil, fmt.Errorf("load shell shortcuts: %w", err)
+	}
 	var env []string
 	for _, e := range os.Environ() {
 		switch {
@@ -521,7 +527,7 @@ func buildDaemonEnv(cfg Config, name, shell string, shellCmd []string) ([]string
 
 	switch mode := shellIntegrationMode(shell, shellCmd); mode {
 	case "zsh":
-		dir, err := ensureZshIntegration(cfg, name)
+		dir, err := ensureZshIntegration(cfg, name, shortcuts)
 		if err != nil {
 			return nil, err
 		}
@@ -536,13 +542,13 @@ func buildDaemonEnv(cfg Config, name, shell string, shellCmd []string) ([]string
 		env = append(env, "TSM_SESSION_FILE="+sessionNameFilePath(cfg, mode, name))
 		env = append(env, "TSM_SHELL_INTEGRATION=zsh")
 	case "bash":
-		if err := ensureBashIntegration(cfg, name); err != nil {
+		if err := ensureBashIntegration(cfg, name, shortcuts); err != nil {
 			return nil, err
 		}
 		env = append(env, "TSM_SESSION_FILE="+sessionNameFilePath(cfg, mode, name))
 		env = append(env, "TSM_SHELL_INTEGRATION=bash")
 	case "fish":
-		dir, err := ensureFishIntegration(cfg, name)
+		dir, err := ensureFishIntegration(cfg, name, shortcuts)
 		if err != nil {
 			return nil, err
 		}
@@ -576,7 +582,7 @@ func shellIntegrationMode(shell string, shellCmd []string) string {
 	}
 }
 
-func ensureZshIntegration(cfg Config, name string) (string, error) {
+func ensureZshIntegration(cfg Config, name string, shortcuts shellShortcuts) (string, error) {
 	dir := shellIntegrationDir(cfg, "zsh", name)
 	if err := os.MkdirAll(dir, 0750); err != nil {
 		return "", fmt.Errorf("mkdir zsh integration dir: %w", err)
@@ -588,7 +594,7 @@ func ensureZshIntegration(cfg Config, name string) (string, error) {
 	files := map[string]string{
 		".zshenv":   zshEnvShim,
 		".zprofile": zshProfileShim,
-		".zshrc":    zshRcShim,
+		".zshrc":    renderZshRcShim(shortcuts),
 		".zlogin":   zshLoginShim,
 		".zlogout":  zshLogoutShim,
 	}
@@ -602,7 +608,7 @@ func ensureZshIntegration(cfg Config, name string) (string, error) {
 	return dir, nil
 }
 
-func ensureBashIntegration(cfg Config, name string) error {
+func ensureBashIntegration(cfg Config, name string, shortcuts shellShortcuts) error {
 	dir := shellIntegrationDir(cfg, "bash", name)
 	if err := os.MkdirAll(dir, 0750); err != nil {
 		return fmt.Errorf("mkdir bash integration dir: %w", err)
@@ -610,13 +616,13 @@ func ensureBashIntegration(cfg Config, name string) error {
 	if err := writeSessionNameFile(sessionNameFilePath(cfg, "bash", name), name); err != nil {
 		return err
 	}
-	if err := os.WriteFile(bashRcFilePath(cfg, name), []byte(bashRcShim), 0640); err != nil {
+	if err := os.WriteFile(bashRcFilePath(cfg, name), []byte(renderBashRcShim(shortcuts)), 0640); err != nil {
 		return fmt.Errorf("write %s: %w", bashRcFilePath(cfg, name), err)
 	}
 	return nil
 }
 
-func ensureFishIntegration(cfg Config, name string) (string, error) {
+func ensureFishIntegration(cfg Config, name string, shortcuts shellShortcuts) (string, error) {
 	dir := shellIntegrationDir(cfg, "fish", name)
 	configDir := filepath.Join(dir, "fish")
 	if err := os.MkdirAll(configDir, 0750); err != nil {
@@ -625,7 +631,7 @@ func ensureFishIntegration(cfg Config, name string) (string, error) {
 	if err := writeSessionNameFile(sessionNameFilePath(cfg, "fish", name), name); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(filepath.Join(configDir, "config.fish"), []byte(fishConfigShim), 0640); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "config.fish"), []byte(renderFishConfigShim(shortcuts)), 0640); err != nil {
 		return "", fmt.Errorf("write fish config: %w", err)
 	}
 	return dir, nil
@@ -663,7 +669,7 @@ const zshProfileShim = `if [[ -n "${TSM_ORIG_ZDOTDIR:-}" && -f "${TSM_ORIG_ZDOTD
 fi
 `
 
-const zshRcShim = `if [[ -n "${TSM_ORIG_ZDOTDIR:-}" && -f "${TSM_ORIG_ZDOTDIR}/.zshrc" ]]; then
+const zshRcShimTemplate = `if [[ -n "${TSM_ORIG_ZDOTDIR:-}" && -f "${TSM_ORIG_ZDOTDIR}/.zshrc" ]]; then
   source "${TSM_ORIG_ZDOTDIR}/.zshrc"
 fi
 
@@ -703,13 +709,29 @@ if [[ -n "${TSM_SESSION:-}" ]]; then
   _tsm_precmd_title
 
   if [[ -o interactive ]]; then
+    _tsm_session_full() {
+      zle -I
+      tsm tui
+      zle reset-prompt
+    }
+    zle -N _tsm_session_full
+__TSM_ZSH_FULL_BIND__
+
     _tsm_session_palette() {
       zle -I
       tsm tui --simplified
       zle reset-prompt
     }
     zle -N _tsm_session_palette
-    bindkey '^P' _tsm_session_palette
+__TSM_ZSH_PALETTE_BIND__
+
+    _tsm_session_toggle() {
+      zle -I
+      tsm toggle
+      zle reset-prompt
+    }
+    zle -N _tsm_session_toggle
+__TSM_ZSH_TOGGLE_BIND__
   fi
 fi
 `
@@ -724,7 +746,7 @@ const zshLogoutShim = `if [[ -n "${TSM_ORIG_ZDOTDIR:-}" && -f "${TSM_ORIG_ZDOTDI
 fi
 `
 
-const bashRcShim = `if [[ -f /etc/profile ]]; then
+const bashRcShimTemplate = `if [[ -f /etc/profile ]]; then
   source /etc/profile
 fi
 
@@ -779,11 +801,13 @@ if [[ -n "${TSM_SESSION:-}" ]]; then
   esac
   _tsm_precmd
 
-  bind -x '"\C-p":"tsm p"'
+__TSM_BASH_FULL_BIND__
+__TSM_BASH_PALETTE_BIND__
+__TSM_BASH_TOGGLE_BIND__
 fi
 `
 
-const fishConfigShim = `if set -q TSM_ORIG_XDG_CONFIG_HOME
+const fishConfigShimTemplate = `if set -q TSM_ORIG_XDG_CONFIG_HOME
   set -l _tsm_fish_root "$TSM_ORIG_XDG_CONFIG_HOME"
 else
   set -l _tsm_fish_root "$HOME/.config"
@@ -835,9 +859,205 @@ if set -q TSM_SESSION
     tsm p
     commandline -f repaint
   end
-  bind \cp __tsm_session_palette
+__TSM_FISH_PALETTE_BIND__
+
+  function __tsm_session_full
+    commandline -f repaint
+    tsm tui
+    commandline -f repaint
+  end
+__TSM_FISH_FULL_BIND__
+
+  function __tsm_session_toggle
+    commandline -f repaint
+    tsm toggle
+    commandline -f repaint
+  end
+__TSM_FISH_TOGGLE_BIND__
 end
 `
+
+type shellShortcuts struct {
+	Full    string
+	Palette string
+	Toggle  string
+}
+
+func defaultShellShortcuts() shellShortcuts {
+	return shellShortcuts{
+		Full:    "ctrl+[",
+		Palette: "ctrl+]",
+	}
+}
+
+func loadShellShortcuts(getenv func(string) string) (shellShortcuts, error) {
+	shortcuts := defaultShellShortcuts()
+	cfg, err := appconfig.Load(getenv)
+	if err != nil {
+		return shellShortcuts{}, err
+	}
+	if cfg.Shell.Shortcuts.Palette != nil {
+		shortcuts.Palette = *cfg.Shell.Shortcuts.Palette
+	}
+	if cfg.Shell.Shortcuts.Full != nil {
+		shortcuts.Full = *cfg.Shell.Shortcuts.Full
+	}
+	if cfg.Shell.Shortcuts.Toggle != nil {
+		shortcuts.Toggle = *cfg.Shell.Shortcuts.Toggle
+	}
+	shortcuts.Full, err = normalizeDirectShellShortcut(shortcuts.Full, defaultShellShortcuts().Full)
+	if err != nil {
+		return shellShortcuts{}, err
+	}
+	shortcuts.Palette, err = normalizeDirectShellShortcut(shortcuts.Palette, defaultShellShortcuts().Palette)
+	if err != nil {
+		return shellShortcuts{}, err
+	}
+	shortcuts.Toggle, err = normalizeDirectShellShortcut(shortcuts.Toggle, "")
+	if err != nil {
+		return shellShortcuts{}, err
+	}
+	return shortcuts, nil
+}
+
+func normalizeDirectShellShortcut(raw, fallback string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if strings.EqualFold(raw, "ctrl+[") {
+		return raw, nil
+	}
+	if _, err := parseShellShortcut(raw, false); err != nil {
+		if strings.HasPrefix(strings.ToLower(raw), "ctrl+") {
+			return "", err
+		}
+		// Prefix mode was removed. Plain keys from old configs fall back.
+		return fallback, nil
+	}
+	return raw, nil
+}
+
+func renderZshRcShim(shortcuts shellShortcuts) string {
+	fullBind := renderZshBind(shortcuts.Full, "_tsm_session_full")
+	paletteBind := renderZshBind(shortcuts.Palette, "_tsm_session_palette")
+	toggleBind := renderZshBind(shortcuts.Toggle, "_tsm_session_toggle")
+	return strings.NewReplacer(
+		"__TSM_ZSH_FULL_BIND__", fullBind,
+		"__TSM_ZSH_PALETTE_BIND__", paletteBind,
+		"__TSM_ZSH_TOGGLE_BIND__", toggleBind,
+	).Replace(zshRcShimTemplate)
+}
+
+func renderBashRcShim(shortcuts shellShortcuts) string {
+	fullBind := renderBashBind(shortcuts.Full, "tsm tui")
+	paletteBind := renderBashBind(shortcuts.Palette, "tsm p")
+	toggleBind := renderBashBind(shortcuts.Toggle, "tsm toggle")
+	return strings.NewReplacer(
+		"__TSM_BASH_FULL_BIND__", fullBind,
+		"__TSM_BASH_PALETTE_BIND__", paletteBind,
+		"__TSM_BASH_TOGGLE_BIND__", toggleBind,
+	).Replace(bashRcShimTemplate)
+}
+
+func renderFishConfigShim(shortcuts shellShortcuts) string {
+	fullBind := renderFishBind(shortcuts.Full, "__tsm_session_full")
+	paletteBind := renderFishBind(shortcuts.Palette, "__tsm_session_palette")
+	toggleBind := renderFishBind(shortcuts.Toggle, "__tsm_session_toggle")
+	return strings.NewReplacer(
+		"__TSM_FISH_FULL_BIND__", fullBind,
+		"__TSM_FISH_PALETTE_BIND__", paletteBind,
+		"__TSM_FISH_TOGGLE_BIND__", toggleBind,
+	).Replace(fishConfigShimTemplate)
+}
+
+func renderZshBind(raw, widget string) string {
+	if raw == "" {
+		return ""
+	}
+	key, _ := parseShellShortcut(raw, false)
+	return fmt.Sprintf("    bindkey '%s' %s", zshShellNotation(key), widget)
+}
+
+func renderBashBind(raw, command string) string {
+	if raw == "" {
+		return ""
+	}
+	key, _ := parseShellShortcut(raw, false)
+	return fmt.Sprintf("  bind -x '\"%s\":\"%s\"'", bashShellNotation(key), command)
+}
+
+func renderFishBind(raw, command string) string {
+	if raw == "" {
+		return ""
+	}
+	key, _ := parseShellShortcut(raw, false)
+	return fmt.Sprintf("  bind %s %s", fishShellNotation(key), command)
+}
+
+type shellShortcutKey struct {
+	Key  rune
+	Ctrl bool
+}
+
+func parseShellShortcut(raw string, allowPlain bool) (shellShortcutKey, error) {
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	if raw == "" {
+		return shellShortcutKey{}, nil
+	}
+	if !strings.HasPrefix(raw, "ctrl+") {
+		if !allowPlain {
+			return shellShortcutKey{}, fmt.Errorf("unsupported shortcut %q", raw)
+		}
+		key := []rune(raw)
+		if len(key) != 1 || unicode.IsSpace(key[0]) {
+			return shellShortcutKey{}, fmt.Errorf("unsupported shortcut %q", raw)
+		}
+		return shellShortcutKey{Key: key[0]}, nil
+	}
+	key := []rune(strings.TrimPrefix(raw, "ctrl+"))
+	if len(key) != 1 {
+		return shellShortcutKey{}, fmt.Errorf("unsupported shortcut %q", raw)
+	}
+	return shellShortcutKey{Key: key[0], Ctrl: true}, nil
+}
+
+func zshCtrlNotation(r rune) string {
+	return "^" + strings.ToUpper(string([]rune{r}))
+}
+
+func bashCtrlNotation(r rune) string {
+	return "\\C-" + string([]rune{r})
+}
+
+func fishCtrlNotation(r rune) string {
+	return "\\c" + string([]rune{r})
+}
+
+func zshShellNotation(key shellShortcutKey) string {
+	if isGhosttyCtrlLeftBracket(key) {
+		return "\\e[91;5u"
+	}
+	return zshCtrlNotation(key.Key)
+}
+
+func bashShellNotation(key shellShortcutKey) string {
+	if isGhosttyCtrlLeftBracket(key) {
+		return "\\e[91;5u"
+	}
+	return bashCtrlNotation(key.Key)
+}
+
+func fishShellNotation(key shellShortcutKey) string {
+	if isGhosttyCtrlLeftBracket(key) {
+		return "\\e\\[91\\;5u"
+	}
+	return fishCtrlNotation(key.Key)
+}
+
+func isGhosttyCtrlLeftBracket(key shellShortcutKey) bool {
+	return key.Ctrl && key.Key == '['
+}
 
 // putUint16LE, putUint32LE, putUint64LE write little-endian integers.
 func putUint16LE(b []byte, v uint16) { b[0] = byte(v); b[1] = byte(v >> 8) }
