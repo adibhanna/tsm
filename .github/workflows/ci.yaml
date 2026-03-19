@@ -16,10 +16,10 @@ jobs:
         with:
           go-version: stable
       - run: test -z "$(gofmt -l $(git ls-files '*.go'))"
-      - run: go vet ./...
       - uses: mlugg/setup-zig@v1
         with:
           version: 0.15.2
       - run: make setup-ghostty-vt
+      - run: make lint
       - run: make test
       - run: make build

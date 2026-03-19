@@ -78,8 +78,8 @@ uninstall: ## Remove installed binary and bundled libghostty-vt under PREFIX
 test: check-ghostty-vt ## Run all tests
 	$(BUILD_ENV) go test ./...
 
-lint: ## Run go vet
-	go vet ./...
+lint: check-ghostty-vt ## Run go vet
+	$(BUILD_ENV) go vet ./...
 
 fmt: ## Format code
 	gofmt -w .
