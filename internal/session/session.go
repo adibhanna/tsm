@@ -18,6 +18,19 @@ type Session struct {
 	Cmd          string
 	Memory       uint64 // filled later by process info
 	Uptime       int    // filled later by process info
+	AgentKind    string
+	AgentState   string
+	AgentSummary string
+	AgentUpdated int64
+	AgentModel   string
+	AgentVersion string
+	AgentPrompt  string
+	AgentPlan    string
+	AgentInput   int64
+	AgentOutput  int64
+	AgentCached  int64
+	AgentTotal   int64
+	AgentContext int64
 	CreatedAt    uint64
 	TaskEndedAt  uint64
 	TaskExitCode uint8

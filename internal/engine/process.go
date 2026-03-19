@@ -2,50 +2,88 @@ package engine
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
 
 // ProcessInfo holds per-session process data fetched asynchronously.
 type ProcessInfo struct {
-	Memory uint64
-	Uptime int // seconds
+	Memory       uint64
+	Uptime       int // seconds
+	AgentKind    string
+	AgentState   string
+	AgentSummary string
+	AgentUpdated int64
+	AgentModel   string
+	AgentVersion string
+	AgentPrompt  string
+	AgentPlan    string
+	AgentInput   int64
+	AgentOutput  int64
+	AgentCached  int64
+	AgentTotal   int64
+	AgentContext int64
 }
 
 // FetchProcessInfo returns a map of session name → ProcessInfo.
 // Uses a single `ps` call to read all processes, then walks the tree in memory.
 func FetchProcessInfo(sessions []Session) map[string]ProcessInfo {
-	rssMap, childMap, etimeMap := readProcessTable()
+	rssMap, childMap, etimeMap, commMap := readProcessTable()
 
 	result := make(map[string]ProcessInfo, len(sessions))
+	agentCache := make(map[string]agentStatus)
 	for _, s := range sessions {
 		pid, err := strconv.Atoi(s.PID)
 		if err != nil {
 			continue
 		}
-		result[s.Name] = ProcessInfo{
+		info := ProcessInfo{
 			Memory: sumTreeRSS(pid, rssMap, childMap),
 			Uptime: etimeMap[pid],
 		}
+		if kind := detectAgentKind(pid, childMap, commMap); kind != "" {
+			cacheKey := kind + "\x00" + s.StartedIn
+			status, ok := agentCache[cacheKey]
+			if !ok {
+				status = lookupAgentStatus(kind, s.StartedIn)
+				agentCache[cacheKey] = status
+			}
+			info.AgentKind = status.Kind
+			info.AgentState = status.State
+			info.AgentSummary = agentStatusSummary(status, s.StartedIn)
+			info.AgentUpdated = status.UpdatedAt
+			info.AgentModel = status.Model
+			info.AgentVersion = status.Version
+			info.AgentPrompt = status.LastPrompt
+			info.AgentPlan = status.Plan
+			info.AgentInput = status.InputTokens
+			info.AgentOutput = status.OutputTokens
+			info.AgentCached = status.CachedTokens
+			info.AgentTotal = status.TotalTokens
+			info.AgentContext = status.ContextWindow
+		}
+		result[s.Name] = info
 	}
 	return result
 }
 
 // readProcessTable parses `ps -eo pid,ppid,rss,etime` into RSS, children, and etime maps.
 // RSS values from ps are in KiB. Etime is parsed into seconds.
-func readProcessTable() (rss map[int]uint64, children map[int][]int, etime map[int]int) {
+func readProcessTable() (rss map[int]uint64, children map[int][]int, etime map[int]int, comm map[int]string) {
 	rss = make(map[int]uint64)
 	children = make(map[int][]int)
 	etime = make(map[int]int)
+	comm = make(map[int]string)
 
-	out, err := runCombinedOutput("ps", "-eo", "pid,ppid,rss,etime")
+	out, err := runCombinedOutput("ps", "-eo", "pid,ppid,rss,etime,comm")
 	if err != nil {
 		return
 	}
 
 	for _, line := range strings.Split(string(out), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) != 4 {
+		if len(fields) < 5 {
 			continue
 		}
 		pid, err1 := strconv.Atoi(fields[0])
@@ -57,6 +95,7 @@ func readProcessTable() (rss map[int]uint64, children map[int][]int, etime map[i
 		rss[pid] = kib * 1024 // KiB → bytes
 		children[ppid] = append(children[ppid], pid)
 		etime[pid] = parseEtime(fields[3])
+		comm[pid] = strings.Join(fields[4:], " ")
 	}
 	return
 }
@@ -99,6 +138,26 @@ func sumTreeRSS(pid int, rss map[int]uint64, children map[int][]int) uint64 {
 		total += sumTreeRSS(child, rss, children)
 	}
 	return total
+}
+
+func detectAgentKind(pid int, children map[int][]int, comm map[int]string) string {
+	var walk func(int) string
+	walk = func(id int) string {
+		name := strings.ToLower(filepath.Base(comm[id]))
+		switch {
+		case strings.Contains(name, "codex"):
+			return "codex"
+		case strings.Contains(name, "claude"):
+			return "claude"
+		}
+		for _, child := range children[id] {
+			if kind := walk(child); kind != "" {
+				return kind
+			}
+		}
+		return ""
+	}
+	return walk(pid)
 }
 
 // FormatBytes formats bytes as a human-readable string (e.g., "12M", "1.2G").

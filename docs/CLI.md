@@ -130,6 +130,8 @@ tsm
 tsm tui
 ```
 
+The full TUI shows a compact Codex / Claude activity line for the selected session when TSM detects one of those agents running inside that session.
+
 Simplified palette:
 
 ```bash
@@ -137,6 +139,8 @@ tsm tui --simplified
 tsm palette
 tsm p
 ```
+
+The simplified palette shows the same selected-session agent activity line, so you can check what Codex or Claude was doing before attaching.
 
 Layout toggle inside the TUI:
 
@@ -156,13 +160,13 @@ Ctrl+O
 | `d` | Detach selected session(s) |
 | `n` | New session |
 | `k` | Kill selected session(s) |
-| `R` | Rename session |
+| `r` | Rename session |
 | `c` | Copy attach command |
 | `s` | Cycle sort mode |
 | `ctrl+o` | Toggle full / simplified layout |
 | `/` | Filter |
 | `[` `]` | Scroll activity log |
-| `r` | Refresh |
+| `ctrl+r` | Refresh |
 | `q` | Quit |
 
 ## Simplified Palette Bindings
@@ -180,12 +184,12 @@ Default keymap:
 | `d` | Detach |
 | `n` | New session |
 | `k` | Kill |
-| `R` | Rename |
+| `r` | Rename |
 | `c` | Copy attach command |
 | `s` | Sort |
 | `ctrl+o` | Toggle layout |
 | `/` | Filter |
-| `r` | Refresh |
+| `ctrl+r` | Refresh |
 | `q` | Quit |
 
 Palette keymap:
@@ -200,11 +204,11 @@ Palette keymap:
 | `ctrl+d` | Detach |
 | `ctrl+t` | New session |
 | `ctrl+x` | Kill |
-| `ctrl+r` | Rename |
+| `r` | Rename |
 | `ctrl+y` | Copy attach command |
 | `ctrl+s` | Sort |
 | `ctrl+o` | Toggle layout |
-| `ctrl+l` | Refresh |
+| `ctrl+r` | Refresh |
 | `ctrl+c` | Quit |
 
 While the palette keymap is active:

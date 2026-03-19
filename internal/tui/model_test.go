@@ -370,6 +370,110 @@ func TestSimplifiedHelpWrapsToPickerWidth(t *testing.T) {
 	}
 }
 
+func TestInitSchedulesAutoRefresh(t *testing.T) {
+	m := NewModel()
+	if cmd := m.Init(); cmd == nil {
+		t.Fatal("Init() should schedule startup work and auto-refresh")
+	}
+}
+
+func TestAutoRefreshReschedules(t *testing.T) {
+	m := NewModel()
+	updated, cmd := m.Update(autoRefreshMsg{})
+	if _, ok := updated.(Model); !ok {
+		t.Fatal("Update(autoRefreshMsg) should keep model type")
+	}
+	if cmd == nil {
+		t.Fatal("auto refresh should reschedule itself")
+	}
+}
+
+func TestSessionsRefreshPreservesSelectedAgentMetadata(t *testing.T) {
+	m := NewModel(Options{Mode: ModeFull})
+	m.width = 120
+	m.height = 30
+	m.sessions = []Session{{
+		Name:         "alpha",
+		PID:          "1",
+		StartedIn:    "/tmp",
+		AgentKind:    "claude",
+		AgentState:   "done",
+		AgentSummary: "Here are the files",
+		AgentUpdated: 1,
+		AgentModel:   "claude-opus-4-6",
+	}}
+	m.markSessionsChanged()
+
+	updated, _ := m.Update(sessionsMsg{sessions: []Session{{
+		Name:      "alpha",
+		PID:       "1",
+		StartedIn: "/tmp",
+	}}})
+	got := updated.(Model)
+	if got.sessions[0].AgentKind != "claude" {
+		t.Fatalf("AgentKind = %q, want preserved claude", got.sessions[0].AgentKind)
+	}
+	if got.sessions[0].AgentSummary != "Here are the files" {
+		t.Fatalf("AgentSummary = %q, want preserved summary", got.sessions[0].AgentSummary)
+	}
+
+	view := stripStyleCodes(got.View().Content)
+	if !strings.Contains(view, "claude") || !strings.Contains(view, "Here are the files") {
+		t.Fatalf("full view should keep agent pane during sessions refresh: %q", view)
+	}
+}
+
+func TestSimplifiedViewShowsSelectedAgentStatus(t *testing.T) {
+	m := NewModel(Options{Mode: ModeSimplified})
+	m.width = 100
+	m.height = 24
+	m.sessions = []Session{{
+		Name:         "alpha",
+		PID:          "1",
+		AgentKind:    "codex",
+		AgentState:   "working",
+		AgentSummary: "exec: make test",
+		AgentUpdated: 1,
+	}}
+	m.markSessionsChanged()
+
+	view := stripStyleCodes(m.View().Content)
+	if !strings.Contains(view, "codex") || !strings.Contains(view, "exec: make test") {
+		t.Fatalf("simplified view missing agent status: %q", view)
+	}
+}
+
+func TestFullViewShowsSelectedAgentStatus(t *testing.T) {
+	m := NewModel(Options{Mode: ModeFull})
+	m.width = 120
+	m.height = 30
+	m.sessions = []Session{{
+		Name:         "alpha",
+		PID:          "1",
+		AgentKind:    "claude",
+		AgentState:   "done",
+		AgentSummary: "Here are the files",
+		AgentUpdated: 1,
+		AgentModel:   "claude-opus-4-6",
+		AgentVersion: "2.1.79",
+		AgentPrompt:  "list all files",
+		AgentInput:   10,
+		AgentOutput:  20,
+		AgentCached:  30,
+		AgentTotal:   60,
+	}}
+	m.preview = "preview"
+	m.markSessionsChanged()
+
+	view := stripStyleCodes(m.View().Content)
+	if !strings.Contains(view, "claude") || !strings.Contains(view, "Here are the files") {
+		t.Fatalf("full view missing agent status: %q", view)
+	}
+	if !strings.Contains(view, "last prompt") || !strings.Contains(view, "list all files") || !strings.Contains(view, "tokens: 60 total") {
+		t.Fatalf("full view missing agent preview details: %q", view)
+	}
+}
+
 // stripStyleCodes removes ANSI escape sequences for test comparison.
 func stripStyleCodes(s string) string {
 	re := regexp.MustCompile(`\x1b\[[0-9;]*m`)

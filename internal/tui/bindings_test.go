@@ -72,6 +72,29 @@ func TestDefaultBindingsMatchCtrlOLayoutToggle(t *testing.T) {
 	}
 }
 
+func TestDefaultBindingsUseRForRenameAndCtrlRForRefresh(t *testing.T) {
+	tests := []Keymap{KeymapDefault, KeymapPalette}
+	for _, keymap := range tests {
+		bindings := DefaultBindings(keymap)
+		if !bindings.Matches(ActionRename, tea.KeyPressMsg{Text: "r"}) {
+			t.Fatalf("keymap %v: expected plain r to rename", keymap)
+		}
+		if bindings.Matches(ActionRename, tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}) {
+			t.Fatalf("keymap %v: expected ctrl+r to stop renaming", keymap)
+		}
+	}
+
+	for _, keymap := range tests {
+		bindings := DefaultBindings(keymap)
+		if !bindings.Matches(ActionRefresh, tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}) {
+			t.Fatalf("keymap %v: expected ctrl+r to refresh", keymap)
+		}
+		if bindings.Matches(ActionRefresh, tea.KeyPressMsg{Text: "r"}) {
+			t.Fatalf("keymap %v: expected plain r to stop refreshing", keymap)
+		}
+	}
+}
+
 func TestJoinBindingLabelsUsesSeparatorForCustomPairs(t *testing.T) {
 	if got := joinBindingLabels("j", "k"); got != "j/k" {
 		t.Fatalf("joinBindingLabels() = %q, want j/k", got)

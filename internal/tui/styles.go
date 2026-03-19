@@ -49,6 +49,21 @@ var (
 	statusStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("76"))
 
+	agentCodexStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("75")).
+			Bold(true)
+
+	agentClaudeStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("177")).
+				Bold(true)
+
+	agentStateStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252")).
+			Bold(true)
+
+	agentMetaStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241"))
+
 	// Confirm prompt
 	confirmStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("196")).

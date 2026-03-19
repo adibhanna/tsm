@@ -153,6 +153,17 @@ The Ghostty-backed build uses `libghostty-vt` to:
 
 This is the required backend for correct Neovim and other full-screen screen restoration.
 
+## Agent Activity Signals
+
+TSM also enriches session metadata for AI-agent-heavy workflows.
+
+When the engine sees a descendant `codex` or `claude` process under a session PTY tree, it looks up a compact activity summary for that session:
+
+- Codex: local thread state from `~/.codex/state_*.sqlite` plus the latest rollout JSONL for that thread
+- Claude Code: local project session JSONL under `~/.claude/projects/...`
+
+That data is not used to control the agent. It is only used to render a short status line in the full TUI and simplified palette so users can see what an agent was doing before switching into that session.
+
 ## Shell Integration
 
 For default interactive shells, the daemon generates shell integration shims.
@@ -245,6 +256,6 @@ This is what makes palette-based switching from inside an attached session work 
 ## Release Model
 
 - bundled release archives ship `tsm` plus `libghostty-vt`
-- Homebrew installs the bundled release artifacts
+- Homebrew is served from the `adibhanna/tsm` tap, not `homebrew/core`
 - source builds require `libghostty-vt` via `pkg-config`
 - `make release` produces a self-contained current-platform archive

@@ -28,9 +28,25 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-      - uses: mlugg/setup-zig@v1
-        with:
-          version: 0.14.0
+      - name: Install Zig 0.15.2
+        run: |
+          set -euo pipefail
+          case "$(uname -s)" in
+            Linux) os=linux ;;
+            Darwin) os=macos ;;
+            *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
+          esac
+          case "$(uname -m)" in
+            x86_64) arch=x86_64 ;;
+            arm64|aarch64) arch=aarch64 ;;
+            *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;;
+          esac
+          version=0.15.2
+          archive="zig-${arch}-${os}-${version}.tar.xz"
+          url="https://ziglang.org/download/${version}/${archive}"
+          curl -L "$url" -o "$archive"
+          tar -xf "$archive"
+          echo "$PWD/zig-${arch}-${os}-${version}" >> "$GITHUB_PATH"
       - run: make setup-ghostty-vt
       - run: make release VERSION=${GITHUB_REF_NAME} COMMIT=${GITHUB_SHA}
       - uses: actions/upload-artifact@v4

@@ -19,6 +19,7 @@ const (
 	paletteMaxWidth   = 68
 	paletteMinWidth   = 46
 	paletteMaxRows    = 8
+	autoRefreshEvery  = 2 * time.Second
 )
 
 type state int
@@ -73,6 +74,7 @@ type previewMsg struct {
 }
 
 type statusClearMsg struct{}
+type autoRefreshMsg struct{}
 
 type killOneResultMsg struct {
 	name string
@@ -149,6 +151,12 @@ func detachOneCmd(name string) tea.Cmd {
 func clearStatusAfter(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg {
 		return statusClearMsg{}
+	})
+}
+
+func autoRefreshCmd() tea.Cmd {
+	return tea.Tick(autoRefreshEvery, func(time.Time) tea.Msg {
+		return autoRefreshMsg{}
 	})
 }
 
@@ -396,7 +404,7 @@ func (m *Model) clampCursor() {
 }
 
 func (m Model) Init() tea.Cmd {
-	return fetchSessionsCmd
+	return tea.Batch(fetchSessionsCmd, autoRefreshCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -415,6 +423,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
+		prevByName := make(map[string]Session, len(m.sessions))
+		for _, s := range m.sessions {
+			prevByName[s.Name] = s
+		}
+		for i := range msg.sessions {
+			if prev, ok := prevByName[msg.sessions[i].Name]; ok {
+				msg.sessions[i].Memory = prev.Memory
+				msg.sessions[i].Uptime = prev.Uptime
+				msg.sessions[i].AgentKind = prev.AgentKind
+				msg.sessions[i].AgentState = prev.AgentState
+				msg.sessions[i].AgentSummary = prev.AgentSummary
+				msg.sessions[i].AgentUpdated = prev.AgentUpdated
+				msg.sessions[i].AgentModel = prev.AgentModel
+				msg.sessions[i].AgentVersion = prev.AgentVersion
+				msg.sessions[i].AgentPrompt = prev.AgentPrompt
+				msg.sessions[i].AgentPlan = prev.AgentPlan
+				msg.sessions[i].AgentInput = prev.AgentInput
+				msg.sessions[i].AgentOutput = prev.AgentOutput
+				msg.sessions[i].AgentCached = prev.AgentCached
+				msg.sessions[i].AgentTotal = prev.AgentTotal
+				msg.sessions[i].AgentContext = prev.AgentContext
+			}
+		}
 		m.sessions = msg.sessions
 		m.markSessionsChanged()
 		live := make(map[string]bool, len(m.sessions))
@@ -430,7 +461,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds := []tea.Cmd{fetchProcessInfoCmd(m.sessions)}
 		visible := m.visibleSessions()
 		if !m.isSimplified() && len(visible) > 0 && m.cursor < len(visible) {
-			cmds = append(cmds, m.previewCmd())
+			if visible[m.cursor].AgentKind == "" {
+				cmds = append(cmds, m.previewCmd())
+			}
 		} else {
 			m.preview = ""
 		}
@@ -442,6 +475,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if info, ok := msg.info[m.sessions[i].Name]; ok {
 				m.sessions[i].Memory = info.Memory
 				m.sessions[i].Uptime = info.Uptime
+				m.sessions[i].AgentKind = info.AgentKind
+				m.sessions[i].AgentState = info.AgentState
+				m.sessions[i].AgentSummary = info.AgentSummary
+				m.sessions[i].AgentUpdated = info.AgentUpdated
+				m.sessions[i].AgentModel = info.AgentModel
+				m.sessions[i].AgentVersion = info.AgentVersion
+				m.sessions[i].AgentPrompt = info.AgentPrompt
+				m.sessions[i].AgentPlan = info.AgentPlan
+				m.sessions[i].AgentInput = info.AgentInput
+				m.sessions[i].AgentOutput = info.AgentOutput
+				m.sessions[i].AgentCached = info.AgentCached
+				m.sessions[i].AgentTotal = info.AgentTotal
+				m.sessions[i].AgentContext = info.AgentContext
 				updated = true
 			}
 		}
@@ -499,6 +545,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case statusClearMsg:
 		m.status = ""
+
+	case autoRefreshMsg:
+		return m, tea.Batch(fetchSessionsCmd, autoRefreshCmd())
 
 	case tea.KeyPressMsg:
 		if m.state == stateFilter {

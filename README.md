@@ -35,6 +35,7 @@ Use it when you want:
 - fast switching between sessions
 - detach / reattach from anywhere
 - a command-palette-style session picker
+- quick Codex / Claude activity checks before switching
 - full-screen restore for Neovim and similar apps on the Ghostty-backed build
 
 Do not expect `tsm` to manage splits. Splits belong to your shell app or your terminal:
@@ -74,18 +75,22 @@ Download the matching archive from GitHub Releases, extract it, and place `tsm` 
 
 ### Homebrew
 
-Homebrew installs the bundled `libghostty-vt` release build from the published tap formula.
+`tsm` is distributed through a custom tap, not `homebrew/core`, so it will not show up in a plain `brew search tsm`.
+
+Install it with the tap-qualified formula name:
 
 ```bash
-brew tap adibhanna/homebrew-tsm
-brew install tsm
+brew tap adibhanna/tsm
+brew install adibhanna/tsm/tsm
 ```
 
 Remove it with:
 
 ```bash
-brew uninstall tsm
+brew uninstall adibhanna/tsm/tsm
 ```
+
+The tap currently builds `tsm` and `libghostty-vt` from source. Once tagged releases are published, the tap is intended to switch to the release archives automatically.
 
 ### Build from source
 
@@ -264,6 +269,7 @@ The full TUI is the best workflow when you want:
 - a live preview
 - session metadata
 - activity log feedback
+- a selected-session Codex / Claude activity line
 - create / rename / detach / kill flows without typing long commands
 
 ### Full TUI default keys
@@ -278,13 +284,13 @@ The full TUI is the best workflow when you want:
 | `d` | Detach selected session(s) |
 | `n` | New session |
 | `k` | Kill selected session(s) |
-| `R` | Rename session |
+| `r` | Rename session |
 | `c` | Copy attach command |
 | `s` | Cycle sort mode |
 | `ctrl+o` | Toggle full / simplified layout |
 | `/` | Filter |
 | `[` `]` | Scroll activity log |
-| `r` | Refresh |
+| `ctrl+r` | Refresh |
 | `q` | Quit |
 
 ## Simplified Palette
@@ -307,8 +313,11 @@ The simplified TUI is the fast-switch mode:
 - list only
 - centered like a command palette
 - built for quick switching once you already know your session names
+- shows the selected session's latest Codex / Claude activity before you jump
 
 By default it uses the same keymap as the full TUI.
+
+When TSM detects a live `codex` or `claude` process inside a session, both TUI layouts render a compact agent-status line for the selected session. That line includes the agent type, a coarse state, relative freshness, and the latest short action summary TSM can infer from the local Codex or Claude session data on disk.
 
 ### Shared default keymap
 
@@ -321,12 +330,12 @@ By default it uses the same keymap as the full TUI.
 | `d` | Detach |
 | `n` | New session |
 | `k` | Kill |
-| `R` | Rename |
+| `r` | Rename |
 | `c` | Copy attach command |
 | `s` | Cycle sort mode |
 | `ctrl+o` | Toggle full / simplified layout |
 | `/` | Filter |
-| `r` | Refresh |
+| `ctrl+r` | Refresh |
 | `q` | Quit |
 
 ### Palette keymap
@@ -349,11 +358,11 @@ The `palette` keymap applies identically to both layouts.
 | `ctrl+d` | Detach |
 | `ctrl+t` | New session |
 | `ctrl+x` | Kill |
-| `ctrl+r` | Rename |
+| `r` | Rename |
 | `ctrl+y` | Copy attach command |
 | `ctrl+s` | Cycle sort mode |
 | `ctrl+o` | Toggle layout |
-| `ctrl+l` | Refresh |
+| `ctrl+r` | Refresh |
 | `ctrl+c` | Quit |
 
 While the palette keymap is active:
@@ -385,7 +394,7 @@ tsm_palette() {
   zle reset-prompt
 }
 zle -N tsm_palette
-bindkey '^g' tsm_palette
+bindkey '^]' tsm_palette
 ```
 
 For `bash`:
@@ -394,10 +403,10 @@ For `bash`:
 tsm_palette() {
   tsm p
 }
-bind -x '"\C-g":tsm_palette'
+bind -x '"\C-]":tsm_palette'
 ```
 
-`Ctrl+G` is the safer global binding because it does not collide with the common shell-history meaning of `Ctrl+P`.
+`Ctrl+]` is a good global binding because it usually stays free at the shell prompt and avoids the more common history/search chords.
 
 ## Config File
 

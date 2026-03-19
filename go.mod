@@ -9,6 +9,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/creack/pty/v2 v2.0.1
 	github.com/mattn/go-runewidth v0.0.21
+	github.com/mattn/go-sqlite3 v1.14.37
 	github.com/pelletier/go-toml/v2 v2.2.4
 	golang.org/x/term v0.41.0
 )

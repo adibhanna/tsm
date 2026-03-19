@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/adibhanna/tsm/internal/engine"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -127,13 +128,21 @@ func (m Model) fullView() tea.View {
 
 	// --- Preview pane ---
 	pw := m.previewInnerWidth()
-	previewContent := clampLines(engine.ScrollPreview(m.preview, m.previewScrollX, pw), ch)
+	selected := Session{}
+	if m.cursor < len(visible) {
+		selected = visible[m.cursor]
+	}
+	previewContent := ""
+	if selected.AgentKind != "" {
+		previewContent = m.renderAgentPreview(selected, pw, ch)
+	} else {
+		previewContent = clampLines(engine.ScrollPreview(m.preview, m.previewScrollX, pw), ch)
+	}
 	previewTitleLeft := " Preview "
 	previewTitleRight := ""
-	if m.cursor < len(visible) {
-		s := visible[m.cursor]
-		previewTitleLeft = fmt.Sprintf(" %s ", s.Name)
-		previewTitleRight = fmt.Sprintf(" 📂 %s ", s.DisplayDir())
+	if selected.Name != "" {
+		previewTitleLeft = fmt.Sprintf(" %s ", selected.Name)
+		previewTitleRight = fmt.Sprintf(" 📂 %s ", selected.DisplayDir())
 	}
 	pow := m.previewOuterWidth()
 
@@ -192,9 +201,23 @@ func (m Model) simplifiedView() tea.View {
 	}
 
 	rowsHeight := m.simplifiedRowsHeight()
+	selected := Session{}
+	visible := m.visibleSessions()
+	if m.cursor < len(visible) {
+		selected = visible[m.cursor]
+	}
+	agentLine := m.renderAgentStatusLine(selected, innerWidth)
 	contentHeight := rowsHeight + 1
+	if agentLine != "" {
+		contentHeight++
+	}
 	listContent := clampLines(m.renderPaletteList(rowsHeight, innerWidth), rowsHeight)
-	bodyContent := clampLines(queryLine+"\n"+listContent, contentHeight)
+	bodyLines := []string{queryLine}
+	if agentLine != "" {
+		bodyLines = append(bodyLines, agentLine)
+	}
+	bodyLines = append(bodyLines, listContent)
+	bodyContent := clampLines(strings.Join(bodyLines, "\n"), contentHeight)
 
 	titleLeft := " sessions "
 	titleRight := ""
@@ -217,6 +240,159 @@ func (m Model) simplifiedView() tea.View {
 	v := tea.NewView(clampLines(full, m.height))
 	v.AltScreen = true
 	return v
+}
+
+func (m Model) renderAgentStatusLine(s Session, width int) string {
+	if s.AgentKind == "" || width < 12 {
+		return ""
+	}
+
+	kindStyle := agentClaudeStyle
+	switch s.AgentKind {
+	case "codex":
+		kindStyle = agentCodexStyle
+	case "claude":
+		kindStyle = agentClaudeStyle
+	}
+
+	parts := []string{
+		kindStyle.Render(s.AgentKind),
+		agentStateStyle.Render(defaultAgentState(s.AgentState)),
+	}
+	if age := engine.FormatRelativeTime(s.AgentUpdated); age != "" {
+		parts = append(parts, agentMetaStyle.Render(age))
+	}
+
+	prefix := strings.Join(parts, "  ")
+	if s.AgentSummary == "" {
+		return prefix
+	}
+
+	plainPrefix := runewidth.StringWidth(ansi.Strip(prefix))
+	avail := width - plainPrefix - 2
+	if avail < 8 {
+		return prefix
+	}
+	summary := truncate(s.AgentSummary, avail)
+	return prefix + "  " + agentMetaStyle.Render(summary)
+}
+
+func defaultAgentState(state string) string {
+	if state == "" {
+		return "active"
+	}
+	return state
+}
+
+func (m Model) renderAgentPreview(s Session, width, height int) string {
+	if s.AgentKind == "" {
+		return ""
+	}
+
+	lines := []string{
+		m.renderAgentPreviewHeader(s),
+		"",
+	}
+
+	stats := []string{}
+	if s.AgentModel != "" {
+		stats = append(stats, "model: "+engine.DisplayAgentModel(s.AgentKind, s.AgentModel))
+	}
+	if s.AgentVersion != "" {
+		stats = append(stats, "version: "+s.AgentVersion)
+	}
+	if age := engine.FormatRelativeTime(s.AgentUpdated); age != "" {
+		stats = append(stats, "updated: "+age+" ago")
+	}
+	if s.AgentPlan != "" {
+		stats = append(stats, "plan: "+s.AgentPlan)
+	}
+	if tokenLine := renderAgentTokenLine(s); tokenLine != "" {
+		stats = append(stats, tokenLine)
+	}
+	if s.AgentContext > 0 {
+		stats = append(stats, "context: "+formatTokenCount(s.AgentContext))
+	}
+
+	for _, stat := range stats {
+		lines = append(lines, agentMetaStyle.Render(stat))
+	}
+
+	if s.AgentPrompt != "" {
+		lines = append(lines, "")
+		lines = append(lines, agentStateStyle.Render("last prompt"))
+		lines = append(lines, wrapPlain("  "+s.AgentPrompt, width))
+	}
+
+	if s.AgentSummary != "" {
+		lines = append(lines, "")
+		lines = append(lines, agentStateStyle.Render("latest update"))
+		lines = append(lines, wrapPlain("  "+s.AgentSummary, width))
+	}
+
+	content := strings.Join(lines, "\n")
+	return clampLines(content, height)
+}
+
+func (m Model) renderAgentPreviewHeader(s Session) string {
+	kindStyle := agentClaudeStyle
+	if s.AgentKind == "codex" {
+		kindStyle = agentCodexStyle
+	}
+	return kindStyle.Render(engine.DisplayAgentModel("", s.AgentKind)) + "  " + agentStateStyle.Render(defaultAgentState(s.AgentState))
+}
+
+func renderAgentTokenLine(s Session) string {
+	parts := []string{}
+	if s.AgentTotal > 0 {
+		parts = append(parts, "tokens: "+formatTokenCount(s.AgentTotal)+" total")
+	}
+	if s.AgentOutput > 0 {
+		parts = append(parts, formatTokenCount(s.AgentOutput)+" out")
+	}
+	if s.AgentCached > 0 {
+		parts = append(parts, formatTokenCount(s.AgentCached)+" cached")
+	}
+	if s.AgentInput > 9 {
+		parts = append(parts, formatTokenCount(s.AgentInput)+" input")
+	}
+	return strings.Join(parts, "  ")
+}
+
+func formatTokenCount(v int64) string {
+	switch {
+	case v >= 1_000_000_000:
+		return fmt.Sprintf("%.1fB", float64(v)/1_000_000_000)
+	case v >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(v)/1_000_000)
+	case v >= 1_000:
+		return fmt.Sprintf("%.1fK", float64(v)/1_000)
+	default:
+		return fmt.Sprintf("%d", v)
+	}
+}
+
+func wrapPlain(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return ""
+	}
+	lines := []string{}
+	line := words[0]
+	for _, word := range words[1:] {
+		next := line + " " + word
+		if lipgloss.Width(next) > width {
+			lines = append(lines, line)
+			line = word
+			continue
+		}
+		line = next
+	}
+	lines = append(lines, line)
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) renderLog() string {
