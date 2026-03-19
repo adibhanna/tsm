@@ -180,7 +180,6 @@ Each shim provides:
 - terminal title updates
 - `$TSM_SESSION`
 - `$TSM_SHELL_INTEGRATION`
-- `Ctrl+[` binding to open the full TUI
 - `Ctrl+]` binding to open the simplified palette
 
 The integration is session-local. Fresh sessions pick up the current integration logic. Existing running sessions keep the shell environment they started with.

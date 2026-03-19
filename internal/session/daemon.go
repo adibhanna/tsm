@@ -885,7 +885,6 @@ type shellShortcuts struct {
 
 func defaultShellShortcuts() shellShortcuts {
 	return shellShortcuts{
-		Full:    "ctrl+[",
 		Palette: "ctrl+]",
 	}
 }
@@ -905,7 +904,7 @@ func loadShellShortcuts(getenv func(string) string) (shellShortcuts, error) {
 	if cfg.Shell.Shortcuts.Toggle != nil {
 		shortcuts.Toggle = *cfg.Shell.Shortcuts.Toggle
 	}
-	shortcuts.Full, err = normalizeDirectShellShortcut(shortcuts.Full, defaultShellShortcuts().Full)
+	shortcuts.Full, err = normalizeDirectShellShortcut(shortcuts.Full, "")
 	if err != nil {
 		return shellShortcuts{}, err
 	}

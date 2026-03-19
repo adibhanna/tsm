@@ -258,7 +258,7 @@ detach = ["x"]
 toggle_layout = ["ctrl+o"]
 
 [shell.shortcuts]
-full = "ctrl+["
+full = ""
 palette = "ctrl+]"
 toggle = ""
 ```
@@ -297,7 +297,6 @@ Supported action names:
 
 Inside fresh TSM-managed interactive shells:
 
-- `Ctrl+[` opens the full TUI
 - `Ctrl+]` opens the simplified palette
 
 Supported integrated shells:
@@ -329,7 +328,7 @@ tsm_palette() {
 bind -x '"\C-g":tsm_palette'
 ```
 
-`Ctrl+G` is still a reasonable global shell shortcut because it stays out of the built-in `Ctrl+[` / `Ctrl+]` TSM shell chords.
+`Ctrl+G` is still a reasonable global shell shortcut because it stays out of the built-in `Ctrl+]` TSM shell chord.
 
 ## Useful Checks
 

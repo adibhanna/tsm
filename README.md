@@ -375,7 +375,6 @@ While the palette keymap is active:
 
 Inside fresh TSM-managed interactive shells:
 
-- `Ctrl+[` opens the full TUI
 - `Ctrl+]` opens the simplified palette
 
 This is provided for:
@@ -384,7 +383,15 @@ This is provided for:
 - `bash`
 - `fish`
 
-If you want a global shortcut from any shell, add this to your shell config instead.
+That built-in shortcut only exists inside TSM-managed shells.
+
+If you also want a separate launcher outside TSM sessions, add one in your shell config or terminal config.
+Keeping both is fine:
+
+- built-in `Ctrl+]` for attached TSM shells
+- your own launcher for normal shells or other contexts
+
+For a shell-level launcher, add this to your shell config.
 
 For `zsh`:
 
@@ -458,7 +465,7 @@ detach = ["x"]
 toggle_layout = ["ctrl+o"]
 
 [shell.shortcuts]
-full = "ctrl+["
+full = ""
 palette = "ctrl+]"
 toggle = ""
 ```
@@ -504,7 +511,6 @@ What it provides:
 - terminal title updates
 - `$TSM_SESSION`
 - `$TSM_SHELL_INTEGRATION`
-- `Ctrl+[` opens the full TUI
 - `Ctrl+]` opens the simplified palette
 
 This integration is applied to fresh sessions started with the current binary. Existing already-running sessions keep the shell environment they started with.

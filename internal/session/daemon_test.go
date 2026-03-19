@@ -122,8 +122,8 @@ func TestBuildDaemonEnvAddsZshIntegration(t *testing.T) {
 		t.Fatalf("read generated .zshrc: %v", err)
 	}
 	text := string(content)
-	if !strings.Contains(text, "bindkey '\\e[91;5u' _tsm_session_full") {
-		t.Fatalf("generated .zshrc missing Ghostty Ctrl+[ full binding: %q", text)
+	if strings.Contains(text, "_tsm_session_full") && strings.Contains(text, "bindkey '\\e[91;5u' _tsm_session_full") {
+		t.Fatalf("generated .zshrc should not bind full shortcut by default: %q", text)
 	}
 	if !strings.Contains(text, "bindkey '^]' _tsm_session_palette") {
 		t.Fatalf("generated .zshrc missing Ctrl+] palette binding: %q", text)
@@ -155,8 +155,8 @@ func TestBuildDaemonEnvAddsBashIntegration(t *testing.T) {
 		t.Fatalf("read generated bash rc: %v", err)
 	}
 	text := string(content)
-	if !strings.Contains(text, `bind -x '"\e[91;5u":"tsm tui"'`) {
-		t.Fatalf("generated bash rc missing Ghostty Ctrl+[ full binding: %q", text)
+	if strings.Contains(text, `bind -x '"\e[91;5u":"tsm tui"'`) {
+		t.Fatalf("generated bash rc should not bind full shortcut by default: %q", text)
 	}
 	if !strings.Contains(text, `bind -x '"\C-]":"tsm p"'`) {
 		t.Fatalf("generated bash rc missing Ctrl+] palette binding: %q", text)
@@ -196,8 +196,8 @@ func TestBuildDaemonEnvAddsFishIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated fish config: %v", err)
 	}
-	if !strings.Contains(string(content), `bind \e\[91\;5u __tsm_session_full`) {
-		t.Fatalf("generated fish config missing Ghostty Ctrl+[ full binding: %q", string(content))
+	if strings.Contains(string(content), `bind \e\[91\;5u __tsm_session_full`) {
+		t.Fatalf("generated fish config should not bind full shortcut by default: %q", string(content))
 	}
 	if !strings.Contains(string(content), `bind \c] __tsm_session_palette`) {
 		t.Fatalf("generated fish config missing Ctrl+] palette binding: %q", string(content))
