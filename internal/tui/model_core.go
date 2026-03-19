@@ -75,6 +75,7 @@ type previewMsg struct {
 
 type statusClearMsg struct{}
 type autoRefreshMsg struct{}
+type refreshSpinnerMsg struct{}
 
 type killOneResultMsg struct {
 	name string
@@ -160,6 +161,12 @@ func autoRefreshCmd() tea.Cmd {
 	})
 }
 
+func refreshSpinnerCmd() tea.Cmd {
+	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg {
+		return refreshSpinnerMsg{}
+	})
+}
+
 // Model
 
 type Model struct {
@@ -179,6 +186,8 @@ type Model struct {
 	previewScrollX int
 	state          state
 	status         string
+	refreshing     bool
+	refreshFrame   int
 	newSessionName string
 	renameOldName  string
 	renameNewName  string
@@ -421,6 +430,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionsMsg:
 		if msg.err != nil {
 			m.err = msg.err
+			if m.refreshing {
+				m.refreshing = false
+				m.status = "Refresh failed"
+				return m, clearStatusAfter(2 * time.Second)
+			}
 			return m, nil
 		}
 		prevByName := make(map[string]Session, len(m.sessions))
@@ -439,6 +453,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				msg.sessions[i].AgentVersion = prev.AgentVersion
 				msg.sessions[i].AgentPrompt = prev.AgentPrompt
 				msg.sessions[i].AgentPlan = prev.AgentPlan
+				msg.sessions[i].AgentApproval = prev.AgentApproval
+				msg.sessions[i].AgentSandbox = prev.AgentSandbox
+				msg.sessions[i].AgentBranch = prev.AgentBranch
+				msg.sessions[i].AgentGitSHA = prev.AgentGitSHA
+				msg.sessions[i].AgentGitOrigin = prev.AgentGitOrigin
+				msg.sessions[i].AgentName = prev.AgentName
+				msg.sessions[i].AgentRole = prev.AgentRole
+				msg.sessions[i].AgentMemory = prev.AgentMemory
+				msg.sessions[i].AgentSessionID = prev.AgentSessionID
+				msg.sessions[i].AgentSubagent = prev.AgentSubagent
 				msg.sessions[i].AgentInput = prev.AgentInput
 				msg.sessions[i].AgentOutput = prev.AgentOutput
 				msg.sessions[i].AgentCached = prev.AgentCached
@@ -467,6 +491,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.preview = ""
 		}
+		if m.refreshing {
+			m.refreshing = false
+			m.refreshFrame = 0
+			m.status = "Refreshed"
+			cmds = append(cmds, clearStatusAfter(1200*time.Millisecond))
+		}
 		return m, tea.Batch(cmds...)
 
 	case processInfoMsg:
@@ -483,6 +513,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sessions[i].AgentVersion = info.AgentVersion
 				m.sessions[i].AgentPrompt = info.AgentPrompt
 				m.sessions[i].AgentPlan = info.AgentPlan
+				m.sessions[i].AgentApproval = info.AgentApproval
+				m.sessions[i].AgentSandbox = info.AgentSandbox
+				m.sessions[i].AgentBranch = info.AgentBranch
+				m.sessions[i].AgentGitSHA = info.AgentGitSHA
+				m.sessions[i].AgentGitOrigin = info.AgentGitOrigin
+				m.sessions[i].AgentName = info.AgentName
+				m.sessions[i].AgentRole = info.AgentRole
+				m.sessions[i].AgentMemory = info.AgentMemory
+				m.sessions[i].AgentSessionID = info.AgentSessionID
+				m.sessions[i].AgentSubagent = info.AgentSubagent
 				m.sessions[i].AgentInput = info.AgentInput
 				m.sessions[i].AgentOutput = info.AgentOutput
 				m.sessions[i].AgentCached = info.AgentCached
@@ -545,6 +585,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case statusClearMsg:
 		m.status = ""
+
+	case refreshSpinnerMsg:
+		if !m.refreshing {
+			return m, nil
+		}
+		m.refreshFrame = (m.refreshFrame + 1) % len(refreshSpinnerFrames)
+		return m, refreshSpinnerCmd()
 
 	case autoRefreshMsg:
 		return m, tea.Batch(fetchSessionsCmd, autoRefreshCmd())

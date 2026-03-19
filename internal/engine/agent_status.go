@@ -26,6 +26,16 @@ type agentStatus struct {
 	Version       string
 	LastPrompt    string
 	Plan          string
+	ApprovalMode  string
+	SandboxPolicy string
+	GitBranch     string
+	GitSHA        string
+	GitOrigin     string
+	AgentName     string
+	AgentRole     string
+	MemoryMode    string
+	SessionID     string
+	IsSubagent    bool
 	InputTokens   int64
 	OutputTokens  int64
 	CachedTokens  int64
@@ -67,15 +77,24 @@ func lookupCodexStatus(cwd string) agentStatus {
 	defer db.Close()
 
 	var title, rolloutPath, modelProvider, cliVersion, source string
+	var sandboxPolicy, approvalMode, gitSHA, gitBranch, gitOrigin string
+	var firstUserMessage, agentNickname, agentRole, memoryMode string
 	var updatedAt, tokensUsed int64
 	err = db.QueryRow(
-		`SELECT title, updated_at, rollout_path, tokens_used, model_provider, cli_version, source
+		`SELECT title, updated_at, rollout_path, tokens_used, model_provider, cli_version, source,
+		        sandbox_policy, approval_mode,
+		        COALESCE(git_sha, ''), COALESCE(git_branch, ''), COALESCE(git_origin_url, ''),
+		        COALESCE(first_user_message, ''), COALESCE(agent_nickname, ''), COALESCE(agent_role, ''), memory_mode
 		   FROM threads
 		  WHERE archived = 0 AND cwd = ?
 		  ORDER BY updated_at DESC
 		  LIMIT 1`,
 		cwd,
-	).Scan(&title, &updatedAt, &rolloutPath, &tokensUsed, &modelProvider, &cliVersion, &source)
+	).Scan(
+		&title, &updatedAt, &rolloutPath, &tokensUsed, &modelProvider, &cliVersion, &source,
+		&sandboxPolicy, &approvalMode, &gitSHA, &gitBranch, &gitOrigin,
+		&firstUserMessage, &agentNickname, &agentRole, &memoryMode,
+	)
 	if err != nil {
 		return agentStatus{}
 	}
@@ -84,23 +103,39 @@ func lookupCodexStatus(cwd string) agentStatus {
 	status.Model = modelProvider
 	status.Version = cliVersion
 	status.Plan = source
+	status.ApprovalMode = approvalMode
+	status.SandboxPolicy = sandboxPolicy
+	status.GitBranch = gitBranch
+	status.GitSHA = gitSHA
+	status.GitOrigin = gitOrigin
+	status.AgentName = agentNickname
+	status.AgentRole = agentRole
+	status.MemoryMode = memoryMode
 	if status.LastPrompt == "" {
-		status.LastPrompt = title
+		status.LastPrompt = firstNonEmpty(firstUserMessage, title)
 	}
 	if status.TotalTokens == 0 {
 		status.TotalTokens = tokensUsed
 	}
 	if status.Kind == "" {
 		status = agentStatus{
-			Kind:        "codex",
-			State:       "recent",
-			Summary:     title,
-			UpdatedAt:   updatedAt,
-			Model:       modelProvider,
-			Version:     cliVersion,
-			LastPrompt:  title,
-			Plan:        source,
-			TotalTokens: tokensUsed,
+			Kind:          "codex",
+			State:         "recent",
+			Summary:       title,
+			UpdatedAt:     updatedAt,
+			Model:         modelProvider,
+			Version:       cliVersion,
+			LastPrompt:    firstNonEmpty(firstUserMessage, title),
+			Plan:          source,
+			ApprovalMode:  approvalMode,
+			SandboxPolicy: sandboxPolicy,
+			GitBranch:     gitBranch,
+			GitSHA:        gitSHA,
+			GitOrigin:     gitOrigin,
+			AgentName:     agentNickname,
+			AgentRole:     agentRole,
+			MemoryMode:    memoryMode,
+			TotalTokens:   tokensUsed,
 		}
 	}
 	return status
@@ -118,8 +153,11 @@ func lookupClaudeStatus(cwd string) agentStatus {
 		return agentStatus{}
 	}
 
-	var newest string
-	var newestMod time.Time
+	type candidate struct {
+		path string
+		mod  time.Time
+	}
+	var candidates []candidate
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
 			continue
@@ -128,16 +166,40 @@ func lookupClaudeStatus(cwd string) agentStatus {
 		if err != nil {
 			continue
 		}
-		if newest == "" || info.ModTime().After(newestMod) {
-			newest = filepath.Join(projectDir, entry.Name())
-			newestMod = info.ModTime()
-		}
+		candidates = append(candidates, candidate{
+			path: filepath.Join(projectDir, entry.Name()),
+			mod:  info.ModTime(),
+		})
 	}
-	if newest == "" {
+	if len(candidates) == 0 {
 		return agentStatus{}
 	}
 
-	return claudeStatusFromSession(newest, cwd, newestMod.Unix())
+	slices.SortFunc(candidates, func(a, b candidate) int {
+		switch {
+		case a.mod.After(b.mod):
+			return -1
+		case a.mod.Before(b.mod):
+			return 1
+		default:
+			return strings.Compare(a.path, b.path)
+		}
+	})
+
+	fallback := agentStatus{}
+	for _, candidate := range candidates {
+		status := claudeStatusFromSession(candidate.path, cwd, candidate.mod.Unix())
+		if status.Kind == "" {
+			continue
+		}
+		if fallback.Kind == "" {
+			fallback = status
+		}
+		if isUsefulClaudeStatus(status, cwd) {
+			return status
+		}
+	}
+	return fallback
 }
 
 func latestMatchingPath(dir, pattern string) (string, error) {
@@ -289,9 +351,31 @@ func claudeStatusFromSession(path, fallback string, fallbackUpdated int64) agent
 			Data      json.RawMessage `json:"data"`
 			IsMeta    bool            `json:"isMeta"`
 			Version   string          `json:"version"`
+			Cwd       string          `json:"cwd"`
+			SessionID string          `json:"sessionId"`
+			GitBranch string          `json:"gitBranch"`
+			AgentID   string          `json:"agentId"`
+			Slug      string          `json:"slug"`
+			IsSidecar bool            `json:"isSidechain"`
 		}
 		if json.Unmarshal([]byte(lines[i]), &entry) != nil {
 			continue
+		}
+
+		if status.SessionID == "" && entry.SessionID != "" {
+			status.SessionID = entry.SessionID
+		}
+		if status.GitBranch == "" && entry.GitBranch != "" {
+			status.GitBranch = entry.GitBranch
+		}
+		if status.AgentName == "" {
+			status.AgentName = firstNonEmpty(entry.Slug, entry.AgentID)
+		}
+		if !status.IsSubagent && entry.IsSidecar {
+			status.IsSubagent = true
+			if status.AgentRole == "" {
+				status.AgentRole = "subagent"
+			}
 		}
 
 		ts := parseUnixTimestamp(entry.Timestamp, fallbackUpdated)
@@ -348,6 +432,13 @@ func claudeStatusFromSession(path, fallback string, fallbackUpdated int64) agent
 					status.Version = entry.Version
 				}
 			}
+		case "last-prompt":
+			var payload struct {
+				LastPrompt string `json:"lastPrompt"`
+			}
+			if json.Unmarshal([]byte(lines[i]), &payload) == nil && lastPrompt == "" {
+				lastPrompt = oneLine(payload.LastPrompt)
+			}
 		}
 		if status.Kind != "" && lastPrompt != "" {
 			break
@@ -361,6 +452,16 @@ func claudeStatusFromSession(path, fallback string, fallbackUpdated int64) agent
 	}
 
 	return status
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func summarizeToolInvocation(name, rawArgs string) string {
@@ -646,4 +747,18 @@ func agentStatusSummary(status agentStatus, cwd string) string {
 		return status.Summary
 	}
 	return agentFallbackSummary(cwd)
+}
+
+func isUsefulClaudeStatus(status agentStatus, cwd string) bool {
+	if status.Kind != "claude" {
+		return false
+	}
+	if status.Model != "" || status.Version != "" || status.TotalTokens > 0 || status.LastPrompt != "" {
+		return true
+	}
+	summary := strings.TrimSpace(status.Summary)
+	if summary == "" {
+		return false
+	}
+	return summary != agentFallbackSummary(cwd)
 }

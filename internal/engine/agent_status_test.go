@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -99,8 +100,12 @@ func TestLookupCodexStatusFromLocalState(t *testing.T) {
 	}
 	if _, err := db.Exec(`
 		INSERT INTO threads (
-			id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, sandbox_policy, approval_mode
-		) VALUES (?, ?, 1, 1710849600, 'cli', 'openai', ?, 'Resolve known issues from docs', 'workspace-write', 'never')
+			id, rollout_path, created_at, updated_at, source, model_provider, cwd, title,
+			sandbox_policy, approval_mode, git_sha, git_branch, first_user_message,
+			agent_nickname, agent_role, memory_mode
+		) VALUES (?, ?, 1, 1710849600, 'cli', 'openai', ?, 'Resolve known issues from docs',
+		          'workspace-write', 'never', 'abcdef1234567890', 'main',
+		          'Please fix the docs', 'worker-1', 'implementer', 'enabled')
 	`, "thread-1", rollout, cwd); err != nil {
 		t.Fatal(err)
 	}
@@ -108,6 +113,15 @@ func TestLookupCodexStatusFromLocalState(t *testing.T) {
 	status := lookupCodexStatus(cwd)
 	if status.Kind != "codex" || status.State != "working" || !strings.Contains(status.Summary, "make test") {
 		t.Fatalf("status = %+v", status)
+	}
+	if status.ApprovalMode != "never" || status.SandboxPolicy != "workspace-write" {
+		t.Fatalf("expected runtime metadata, got %+v", status)
+	}
+	if status.GitBranch != "main" || status.GitSHA != "abcdef1234567890" {
+		t.Fatalf("expected git metadata, got %+v", status)
+	}
+	if status.LastPrompt != "Please fix the docs" || status.AgentName != "worker-1" || status.AgentRole != "implementer" || status.MemoryMode != "enabled" {
+		t.Fatalf("expected prompt/agent metadata, got %+v", status)
 	}
 }
 
@@ -133,6 +147,81 @@ func TestLookupClaudeStatusFromSessionJSONL(t *testing.T) {
 
 	status := lookupClaudeStatus(cwd)
 	if status.Kind != "claude" || status.State != "working" || !strings.Contains(status.Summary, "README.md") {
+		t.Fatalf("status = %+v", status)
+	}
+	if status.GitBranch != "" {
+		t.Fatalf("expected empty branch when not present, got %+v", status)
+	}
+}
+
+func TestLookupClaudeStatusCapturesBranchAndSubagent(t *testing.T) {
+	home := t.TempDir()
+	origHome := agentUserHomeDir
+	defer func() { agentUserHomeDir = origHome }()
+	agentUserHomeDir = func() (string, error) { return home, nil }
+
+	cwd := "/Users/test/work"
+	projectDir := filepath.Join(home, ".claude", "projects", sanitizeClaudeProjectPath(cwd))
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionPath := filepath.Join(projectDir, "session.jsonl")
+	content := strings.Join([]string{
+		`{"type":"user","timestamp":"2026-03-19T12:00:00Z","sessionId":"sess-1","gitBranch":"main","slug":"keen-dawn","isSidechain":true,"message":{"content":"please update the docs"}}`,
+		`{"type":"assistant","timestamp":"2026-03-19T12:00:03Z","sessionId":"sess-1","gitBranch":"main","slug":"keen-dawn","isSidechain":true,"message":{"content":[{"type":"text","text":"Done."}],"stop_reason":"end_turn"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(sessionPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	status := lookupClaudeStatus(cwd)
+	if status.GitBranch != "main" || status.SessionID != "sess-1" || status.AgentName != "keen-dawn" || !status.IsSubagent {
+		t.Fatalf("status = %+v", status)
+	}
+	if status.AgentRole != "subagent" {
+		t.Fatalf("expected subagent role, got %+v", status)
+	}
+}
+
+func TestLookupClaudeStatusSkipsLowSignalNewestSession(t *testing.T) {
+	home := t.TempDir()
+	origHome := agentUserHomeDir
+	defer func() { agentUserHomeDir = origHome }()
+	agentUserHomeDir = func() (string, error) { return home, nil }
+
+	cwd := "/Users/test/work"
+	projectDir := filepath.Join(home, ".claude", "projects", sanitizeClaudeProjectPath(cwd))
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	older := filepath.Join(projectDir, "older.jsonl")
+	olderContent := strings.Join([]string{
+		`{"type":"assistant","timestamp":"2026-03-19T12:00:03Z","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/Users/test/work/README.md"}}]}}`,
+		`{"type":"last-prompt","lastPrompt":"list all the files","sessionId":"sess-1"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(older, []byte(olderContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	newer := filepath.Join(projectDir, "newer.jsonl")
+	newerContent := strings.Join([]string{
+		`{"type":"user","timestamp":"2026-03-19T12:10:00Z","isMeta":true,"message":{"content":"<local-command-caveat>ignore</local-command-caveat>"}}`,
+		`{"type":"user","timestamp":"2026-03-19T12:10:00Z","message":{"content":"<command-name>/clear</command-name>"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(newer, []byte(newerContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := os.Chtimes(older, now.Add(-2*time.Minute), now.Add(-2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newer, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	status := lookupClaudeStatus(cwd)
+	if status.Kind != "claude" || status.LastPrompt != "list all the files" {
 		t.Fatalf("status = %+v", status)
 	}
 }

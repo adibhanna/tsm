@@ -39,6 +39,10 @@ const termResetSeq = "\033[?1000l\033[?1002l\033[?1003l\033[?1006l" +
 	"\033[?25h" +
 	"\033[0m"
 
+// After leaving a session, start the local terminal on a clean visible frame so
+// the shell prompt doesn't land at the cursor position left by the detached app.
+const termExitSeq = termResetSeq + "\033[2J\033[H"
+
 // Attach connects to a session and relays I/O between the local terminal and the PTY.
 func Attach(cfg Config, name string) error {
 	path := cfg.SocketPath(name)
@@ -56,7 +60,7 @@ func Attach(cfg Config, name string) error {
 	defer func() {
 		term.Restore(int(os.Stdin.Fd()), oldState)
 		// Reset terminal modes that the session may have enabled.
-		os.Stdout.WriteString(termResetSeq)
+		os.Stdout.WriteString(termExitSeq)
 	}()
 
 	// Ignore SIGQUIT so Ctrl+\ doesn't kill us — we use it to detach.

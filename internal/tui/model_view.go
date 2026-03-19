@@ -11,6 +11,8 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
+var refreshSpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
 func previewMaxWidth(raw string) int {
 	return engine.PreviewWidth(raw)
 }
@@ -256,7 +258,7 @@ func (m Model) renderAgentStatusLine(s Session, width int) string {
 	}
 
 	parts := []string{
-		kindStyle.Render(s.AgentKind),
+		kindStyle.Render(displayAgentKind(s.AgentKind)),
 		agentStateStyle.Render(defaultAgentState(s.AgentState)),
 	}
 	if age := engine.FormatRelativeTime(s.AgentUpdated); age != "" {
@@ -274,7 +276,7 @@ func (m Model) renderAgentStatusLine(s Session, width int) string {
 		return prefix
 	}
 	summary := truncate(s.AgentSummary, avail)
-	return prefix + "  " + agentMetaStyle.Render(summary)
+	return prefix + "  " + agentMetaStyle.Render("· "+summary)
 }
 
 func defaultAgentState(state string) string {
@@ -294,41 +296,10 @@ func (m Model) renderAgentPreview(s Session, width, height int) string {
 		"",
 	}
 
-	stats := []string{}
-	if s.AgentModel != "" {
-		stats = append(stats, "model: "+engine.DisplayAgentModel(s.AgentKind, s.AgentModel))
-	}
-	if s.AgentVersion != "" {
-		stats = append(stats, "version: "+s.AgentVersion)
-	}
-	if age := engine.FormatRelativeTime(s.AgentUpdated); age != "" {
-		stats = append(stats, "updated: "+age+" ago")
-	}
-	if s.AgentPlan != "" {
-		stats = append(stats, "plan: "+s.AgentPlan)
-	}
-	if tokenLine := renderAgentTokenLine(s); tokenLine != "" {
-		stats = append(stats, tokenLine)
-	}
-	if s.AgentContext > 0 {
-		stats = append(stats, "context: "+formatTokenCount(s.AgentContext))
-	}
-
-	for _, stat := range stats {
-		lines = append(lines, agentMetaStyle.Render(stat))
-	}
-
-	if s.AgentPrompt != "" {
-		lines = append(lines, "")
-		lines = append(lines, agentStateStyle.Render("last prompt"))
-		lines = append(lines, wrapPlain("  "+s.AgentPrompt, width))
-	}
-
-	if s.AgentSummary != "" {
-		lines = append(lines, "")
-		lines = append(lines, agentStateStyle.Render("latest update"))
-		lines = append(lines, wrapPlain("  "+s.AgentSummary, width))
-	}
+	lines = appendSection(lines, "overview", renderOverviewRows(s))
+	lines = appendSection(lines, "runtime", renderRuntimeRows(s))
+	lines = appendSection(lines, "usage", renderUsageRows(s))
+	lines = appendSection(lines, "recent", renderRecentRows(s, width))
 
 	content := strings.Join(lines, "\n")
 	return clampLines(content, height)
@@ -339,24 +310,34 @@ func (m Model) renderAgentPreviewHeader(s Session) string {
 	if s.AgentKind == "codex" {
 		kindStyle = agentCodexStyle
 	}
-	return kindStyle.Render(engine.DisplayAgentModel("", s.AgentKind)) + "  " + agentStateStyle.Render(defaultAgentState(s.AgentState))
-}
-
-func renderAgentTokenLine(s Session) string {
-	parts := []string{}
-	if s.AgentTotal > 0 {
-		parts = append(parts, "tokens: "+formatTokenCount(s.AgentTotal)+" total")
+	parts := []string{
+		kindStyle.Render(displayAgentKind(s.AgentKind)),
+		agentStateStyle.Render(defaultAgentState(s.AgentState)),
 	}
-	if s.AgentOutput > 0 {
-		parts = append(parts, formatTokenCount(s.AgentOutput)+" out")
-	}
-	if s.AgentCached > 0 {
-		parts = append(parts, formatTokenCount(s.AgentCached)+" cached")
-	}
-	if s.AgentInput > 9 {
-		parts = append(parts, formatTokenCount(s.AgentInput)+" input")
+	if age := engine.FormatRelativeTime(s.AgentUpdated); age != "" {
+		parts = append(parts, agentMetaStyle.Render(age+" ago"))
 	}
 	return strings.Join(parts, "  ")
+}
+
+func renderUsageRows(s Session) []string {
+	rows := []string{}
+	if s.AgentTotal > 0 {
+		rows = append(rows, "tokens: "+formatTokenCount(s.AgentTotal)+" total")
+	}
+	if s.AgentOutput > 0 {
+		rows = append(rows, "output: "+formatTokenCount(s.AgentOutput))
+	}
+	if s.AgentCached > 0 {
+		rows = append(rows, "cached: "+formatTokenCount(s.AgentCached))
+	}
+	if s.AgentInput > 9 {
+		rows = append(rows, "input: "+formatTokenCount(s.AgentInput))
+	}
+	if s.AgentContext > 0 {
+		rows = append(rows, "context: "+formatTokenCount(s.AgentContext))
+	}
+	return rows
 }
 
 func formatTokenCount(v int64) string {
@@ -627,7 +608,7 @@ func (m Model) renderHelp() string {
 	)
 
 	if m.status != "" {
-		parts = append(parts, statusStyle.Render(m.status))
+		parts = append(parts, statusStyle.Render(m.renderStatus()))
 	}
 
 	return wrapHelpParts(parts, m.width)
@@ -667,9 +648,112 @@ func (m Model) renderSimplifiedHelp() string {
 	}
 	lines := wrapHelpColumns(items, 2)
 	if m.status != "" {
-		lines = append(lines, " "+statusStyle.Render(m.status))
+		lines = append(lines, " "+statusStyle.Render(m.renderStatus()))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func renderOverviewRows(s Session) []string {
+	rows := []string{}
+	if model := engine.DisplayAgentModel(s.AgentKind, s.AgentModel); model != "" {
+		rows = append(rows, "model: "+model)
+	}
+	if s.AgentVersion != "" {
+		rows = append(rows, "version: "+s.AgentVersion)
+	}
+	if s.AgentBranch != "" {
+		rows = append(rows, "branch: "+s.AgentBranch)
+	}
+	if s.AgentName != "" {
+		label := "agent: " + s.AgentName
+		if s.AgentSubagent {
+			label += " (subagent)"
+		}
+		rows = append(rows, label)
+	}
+	if s.AgentRole != "" && s.AgentRole != "subagent" {
+		rows = append(rows, "role: "+s.AgentRole)
+	}
+	if s.AgentPlan != "" {
+		rows = append(rows, "source: "+s.AgentPlan)
+	}
+	return rows
+}
+
+func renderRuntimeRows(s Session) []string {
+	rows := []string{}
+	if s.AgentApproval != "" {
+		rows = append(rows, "approval: "+s.AgentApproval)
+	}
+	if s.AgentSandbox != "" {
+		rows = append(rows, "sandbox: "+s.AgentSandbox)
+	}
+	if s.AgentMemory != "" {
+		rows = append(rows, "memory: "+s.AgentMemory)
+	}
+	if sha := shortSHA(s.AgentGitSHA); sha != "" {
+		rows = append(rows, "commit: "+sha)
+	}
+	return rows
+}
+
+func renderRecentRows(s Session, width int) []string {
+	rows := []string{}
+	if s.AgentPrompt != "" {
+		rows = append(rows, agentStateStyle.Render("last prompt"))
+		rows = append(rows, wrapPlain("  "+s.AgentPrompt, width))
+	}
+	if s.AgentSummary != "" {
+		if len(rows) > 0 {
+			rows = append(rows, "")
+		}
+		rows = append(rows, agentStateStyle.Render("latest update"))
+		rows = append(rows, wrapPlain("  "+s.AgentSummary, width))
+	}
+	return rows
+}
+
+func appendSection(lines []string, title string, rows []string) []string {
+	if len(rows) == 0 {
+		return lines
+	}
+	lines = append(lines, agentStateStyle.Render(title))
+	for _, row := range rows {
+		if strings.TrimSpace(row) == "" {
+			lines = append(lines, "")
+			continue
+		}
+		if strings.Contains(row, "\n") {
+			lines = append(lines, row)
+			continue
+		}
+		if ansi.Strip(row) != row {
+			lines = append(lines, row)
+			continue
+		}
+		lines = append(lines, agentMetaStyle.Render(row))
+	}
+	lines = append(lines, "")
+	return lines
+}
+
+func shortSHA(sha string) string {
+	sha = strings.TrimSpace(sha)
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
+}
+
+func displayAgentKind(kind string) string {
+	return engine.DisplayAgentModel("", kind)
+}
+
+func (m Model) renderStatus() string {
+	if !m.refreshing {
+		return m.status
+	}
+	return refreshSpinnerFrames[m.refreshFrame%len(refreshSpinnerFrames)] + " " + m.status
 }
 
 func (m Model) simplifiedOuterWidth() int {

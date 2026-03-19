@@ -222,6 +222,46 @@ func TestRenderHelpIncludesDetachAction(t *testing.T) {
 	}
 }
 
+func TestManualRefreshShowsSpinnerStatus(t *testing.T) {
+	m := NewModel(Options{Mode: ModeFull})
+	m.width = 120
+	m.height = 30
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
+	got := updated.(Model)
+	if !got.refreshing {
+		t.Fatal("manual refresh should enter refreshing state")
+	}
+	if cmd == nil {
+		t.Fatal("manual refresh should schedule fetch/spinner work")
+	}
+
+	plain := stripStyleCodes(got.renderHelp())
+	if !strings.Contains(plain, "Refreshing") {
+		t.Fatalf("renderHelp() = %q, want refreshing status", plain)
+	}
+}
+
+func TestSessionsMsgCompletesManualRefreshStatus(t *testing.T) {
+	m := NewModel(Options{Mode: ModeFull})
+	m.width = 120
+	m.height = 30
+	m.refreshing = true
+	m.status = "Refreshing"
+
+	updated, cmd := m.Update(sessionsMsg{sessions: []Session{{Name: "alpha", PID: "1"}}})
+	got := updated.(Model)
+	if got.refreshing {
+		t.Fatal("sessions refresh should end refreshing state")
+	}
+	if got.status != "Refreshed" {
+		t.Fatalf("status = %q, want Refreshed", got.status)
+	}
+	if cmd == nil {
+		t.Fatal("sessions refresh should schedule follow-up commands")
+	}
+}
+
 func TestNewModelDefaultsToDefaultKeymap(t *testing.T) {
 	m := NewModel(Options{Mode: ModeSimplified})
 	if m.keymap() != KeymapDefault {
@@ -451,19 +491,22 @@ func TestFullViewShowsSelectedAgentStatus(t *testing.T) {
 	m.width = 120
 	m.height = 30
 	m.sessions = []Session{{
-		Name:         "alpha",
-		PID:          "1",
-		AgentKind:    "claude",
-		AgentState:   "done",
-		AgentSummary: "Here are the files",
-		AgentUpdated: 1,
-		AgentModel:   "claude-opus-4-6",
-		AgentVersion: "2.1.79",
-		AgentPrompt:  "list all files",
-		AgentInput:   10,
-		AgentOutput:  20,
-		AgentCached:  30,
-		AgentTotal:   60,
+		Name:          "alpha",
+		PID:           "1",
+		AgentKind:     "claude",
+		AgentState:    "done",
+		AgentSummary:  "Here are the files",
+		AgentUpdated:  1,
+		AgentModel:    "claude-opus-4-6",
+		AgentVersion:  "2.1.79",
+		AgentPrompt:   "list all files",
+		AgentBranch:   "main",
+		AgentName:     "keen-dawn",
+		AgentSubagent: true,
+		AgentInput:    10,
+		AgentOutput:   20,
+		AgentCached:   30,
+		AgentTotal:    60,
 	}}
 	m.preview = "preview"
 	m.markSessionsChanged()
@@ -472,8 +515,50 @@ func TestFullViewShowsSelectedAgentStatus(t *testing.T) {
 	if !strings.Contains(view, "claude") || !strings.Contains(view, "Here are the files") {
 		t.Fatalf("full view missing agent status: %q", view)
 	}
-	if !strings.Contains(view, "last prompt") || !strings.Contains(view, "list all files") || !strings.Contains(view, "tokens: 60 total") {
+	if !strings.Contains(view, "overview") || !strings.Contains(view, "branch: main") || !strings.Contains(view, "agent: keen-dawn (subagent)") {
+		t.Fatalf("full view missing overview details: %q", view)
+	}
+	if !strings.Contains(view, "usage") || !strings.Contains(view, "tokens: 60 total") || !strings.Contains(view, "output: 20") {
+		t.Fatalf("full view missing usage details: %q", view)
+	}
+	if !strings.Contains(view, "recent") || !strings.Contains(view, "last prompt") || !strings.Contains(view, "list all files") {
 		t.Fatalf("full view missing agent preview details: %q", view)
+	}
+}
+
+func TestFullViewShowsCodexRuntimeMetadata(t *testing.T) {
+	m := NewModel(Options{Mode: ModeFull})
+	m.width = 120
+	m.height = 30
+	m.sessions = []Session{{
+		Name:          "alpha",
+		PID:           "1",
+		AgentKind:     "codex",
+		AgentState:    "working",
+		AgentSummary:  "exec: make test",
+		AgentUpdated:  1,
+		AgentModel:    "openai",
+		AgentVersion:  "1.2.3",
+		AgentPrompt:   "run tests",
+		AgentPlan:     "cli",
+		AgentApproval: "never",
+		AgentSandbox:  "workspace-write",
+		AgentBranch:   "main",
+		AgentGitSHA:   "abcdef1234567890",
+		AgentName:     "worker-1",
+		AgentRole:     "implementer",
+		AgentMemory:   "enabled",
+		AgentTotal:    1000,
+		AgentContext:  2000,
+	}}
+	m.markSessionsChanged()
+
+	view := stripStyleCodes(m.View().Content)
+	if !strings.Contains(view, "runtime") || !strings.Contains(view, "approval: never") || !strings.Contains(view, "sandbox: workspace-write") {
+		t.Fatalf("full view missing runtime details: %q", view)
+	}
+	if !strings.Contains(view, "memory: enabled") || !strings.Contains(view, "commit: abcdef12") {
+		t.Fatalf("full view missing codex metadata: %q", view)
 	}
 }
 

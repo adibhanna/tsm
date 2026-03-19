@@ -152,7 +152,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.renameNewName = visible[m.cursor].Name
 			}
 		case m.isRefreshKey(msg):
-			return m, fetchSessionsCmd
+			m.refreshing = true
+			m.refreshFrame = 0
+			m.status = "Refreshing"
+			return m, tea.Batch(fetchSessionsCmd, refreshSpinnerCmd())
 		case m.isFilterKey(msg):
 			m.state = stateFilter
 		case m.isSortKey(msg):

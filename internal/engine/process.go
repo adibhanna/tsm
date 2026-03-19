@@ -9,21 +9,31 @@ import (
 
 // ProcessInfo holds per-session process data fetched asynchronously.
 type ProcessInfo struct {
-	Memory       uint64
-	Uptime       int // seconds
-	AgentKind    string
-	AgentState   string
-	AgentSummary string
-	AgentUpdated int64
-	AgentModel   string
-	AgentVersion string
-	AgentPrompt  string
-	AgentPlan    string
-	AgentInput   int64
-	AgentOutput  int64
-	AgentCached  int64
-	AgentTotal   int64
-	AgentContext int64
+	Memory         uint64
+	Uptime         int // seconds
+	AgentKind      string
+	AgentState     string
+	AgentSummary   string
+	AgentUpdated   int64
+	AgentModel     string
+	AgentVersion   string
+	AgentPrompt    string
+	AgentPlan      string
+	AgentApproval  string
+	AgentSandbox   string
+	AgentBranch    string
+	AgentGitSHA    string
+	AgentGitOrigin string
+	AgentName      string
+	AgentRole      string
+	AgentMemory    string
+	AgentSessionID string
+	AgentSubagent  bool
+	AgentInput     int64
+	AgentOutput    int64
+	AgentCached    int64
+	AgentTotal     int64
+	AgentContext   int64
 }
 
 // FetchProcessInfo returns a map of session name → ProcessInfo.
@@ -57,6 +67,16 @@ func FetchProcessInfo(sessions []Session) map[string]ProcessInfo {
 			info.AgentVersion = status.Version
 			info.AgentPrompt = status.LastPrompt
 			info.AgentPlan = status.Plan
+			info.AgentApproval = status.ApprovalMode
+			info.AgentSandbox = status.SandboxPolicy
+			info.AgentBranch = status.GitBranch
+			info.AgentGitSHA = status.GitSHA
+			info.AgentGitOrigin = status.GitOrigin
+			info.AgentName = status.AgentName
+			info.AgentRole = status.AgentRole
+			info.AgentMemory = status.MemoryMode
+			info.AgentSessionID = status.SessionID
+			info.AgentSubagent = status.IsSubagent
 			info.AgentInput = status.InputTokens
 			info.AgentOutput = status.OutputTokens
 			info.AgentCached = status.CachedTokens
