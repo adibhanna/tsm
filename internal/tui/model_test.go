@@ -217,6 +217,9 @@ func TestRenderHelpIncludesDetachAction(t *testing.T) {
 	if !strings.Contains(plain, "d detach") {
 		t.Fatalf("renderHelp() = %q, want detach action", plain)
 	}
+	if !strings.Contains(plain, "^r refresh") {
+		t.Fatalf("renderHelp() = %q, want refresh action", plain)
+	}
 }
 
 func TestNewModelDefaultsToDefaultKeymap(t *testing.T) {

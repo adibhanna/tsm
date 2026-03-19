@@ -425,7 +425,7 @@ func (m *Model) renderList(maxRows int) string {
 		if m.filterText != "" {
 			return normalStyle.Render("  No matches. Esc to clear filter.")
 		}
-		return normalStyle.Render("  No sessions found. Press r to refresh.")
+		return normalStyle.Render("  No sessions found. Press " + m.refreshKeyLabel() + " to refresh.")
 	}
 
 	lw := m.listInnerWidth()
@@ -613,6 +613,7 @@ func (m Model) renderHelp() string {
 		helpKeyStyle.Render(m.renameKeyLabel()) + helpStyle.Render(" rename"),
 		helpKeyStyle.Render(m.copyKeyLabel()) + helpStyle.Render(" copy cmd"),
 		helpKeyStyle.Render(m.sortKeyLabel()) + helpStyle.Render(" sort"),
+		helpKeyStyle.Render(m.refreshKeyLabel()) + helpStyle.Render(" refresh"),
 		helpKeyStyle.Render(m.toggleLayoutKeyLabel()) + helpStyle.Render(" layout"),
 	}
 	if m.filterText != "" {
