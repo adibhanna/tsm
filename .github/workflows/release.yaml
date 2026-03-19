@@ -30,7 +30,7 @@ jobs:
           go-version: stable
       - uses: mlugg/setup-zig@v1
         with:
-          version: 0.15.2
+          version: 0.14.0
       - run: make setup-ghostty-vt
       - run: make release VERSION=${GITHUB_REF_NAME} COMMIT=${GITHUB_SHA}
       - uses: actions/upload-artifact@v4

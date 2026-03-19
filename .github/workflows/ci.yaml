@@ -18,7 +18,7 @@ jobs:
       - run: test -z "$(gofmt -l $(git ls-files '*.go'))"
       - uses: mlugg/setup-zig@v1
         with:
-          version: 0.15.2
+          version: 0.14.0
       - run: make setup-ghostty-vt
       - run: make lint
       - run: make test
