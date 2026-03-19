@@ -2,6 +2,7 @@ package tui
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -164,6 +165,208 @@ func TestVisibleSessionsInvalidatesAfterFilterAndSortChange(t *testing.T) {
 	visible = m.visibleSessions()
 	if len(visible) != 2 || visible[0].Name != "beta" {
 		t.Fatalf("sort invalidation failed: %+v", visible)
+	}
+}
+
+func TestActionTargetsUsesSelectedSessions(t *testing.T) {
+	m := initialModel()
+	m.sessions = []Session{{Name: "alpha"}, {Name: "beta"}}
+	m.selected["beta"] = true
+	m.selected["alpha"] = true
+
+	got := m.actionTargets()
+	slices.Sort(got)
+	want := []string{"alpha", "beta"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("actionTargets = %#v, want %#v", got, want)
+	}
+}
+
+func TestActionTargetsFallsBackToCursor(t *testing.T) {
+	m := initialModel()
+	m.sessions = []Session{{Name: "alpha"}, {Name: "beta"}}
+	m.cursor = 1
+
+	got := m.actionTargets()
+	want := []string{"beta"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("actionTargets = %#v, want %#v", got, want)
+	}
+}
+
+func TestToggleSelectAllSelectsAndClearsVisible(t *testing.T) {
+	m := initialModel()
+	visible := []Session{{Name: "alpha"}, {Name: "beta"}}
+
+	m.toggleSelectAll(visible)
+	if !m.selected["alpha"] || !m.selected["beta"] {
+		t.Fatalf("expected both sessions selected, got %#v", m.selected)
+	}
+
+	m.toggleSelectAll(visible)
+	if len(m.selected) != 0 {
+		t.Fatalf("expected visible selections cleared, got %#v", m.selected)
+	}
+}
+
+func TestRenderHelpIncludesDetachAction(t *testing.T) {
+	m := initialModel()
+	m.width = 200
+
+	plain := stripStyleCodes(m.renderHelp())
+	if !strings.Contains(plain, "d detach") {
+		t.Fatalf("renderHelp() = %q, want detach action", plain)
+	}
+}
+
+func TestNewModelDefaultsToDefaultKeymap(t *testing.T) {
+	m := NewModel(Options{Mode: ModeSimplified})
+	if m.keymap() != KeymapDefault {
+		t.Fatalf("keymap = %v, want default", m.keymap())
+	}
+	if m.inlineFilterEnabled() {
+		t.Fatal("default keymap should not enable inline palette filtering")
+	}
+}
+
+func TestPaletteKeymapEnablesInlineFilteringInAllLayouts(t *testing.T) {
+	full := NewModel(Options{Mode: ModeFull, Keymap: KeymapPalette})
+	if !full.inlineFilterEnabled() {
+		t.Fatal("full layout should honor palette keymap behavior")
+	}
+
+	simplified := NewModel(Options{Mode: ModeSimplified, Keymap: KeymapPalette})
+	if !simplified.inlineFilterEnabled() {
+		t.Fatal("simplified layout should honor palette keymap behavior")
+	}
+}
+
+func TestSimplifiedViewOmitsPreviewAndLog(t *testing.T) {
+	m := NewModel(Options{Mode: ModeSimplified})
+	m.width = 100
+	m.height = 24
+	m.sessions = []Session{{Name: "alpha", PID: "1"}}
+	m.markSessionsChanged()
+
+	view := stripStyleCodes(m.View().Content)
+	if strings.Contains(view, "Preview") {
+		t.Fatalf("simplified view should not render preview pane: %q", view)
+	}
+	if strings.Contains(view, "Activity Log") {
+		t.Fatalf("simplified view should not render log pane: %q", view)
+	}
+	if !strings.Contains(view, "sessions") {
+		t.Fatalf("simplified view missing sessions title: %q", view)
+	}
+}
+
+func TestSimplifiedPaletteTypingFiltersSessions(t *testing.T) {
+	m := NewModel(Options{Mode: ModeSimplified, Keymap: KeymapPalette})
+	m.sessions = []Session{{Name: "alpha"}, {Name: "beta"}}
+	m.markSessionsChanged()
+
+	updated, _ := m.Update(tea.KeyPressMsg{Text: "b"})
+	got := updated.(Model)
+	if got.filterText != "b" {
+		t.Fatalf("filterText = %q, want %q", got.filterText, "b")
+	}
+	visible := got.visibleSessions()
+	if len(visible) != 1 || visible[0].Name != "beta" {
+		t.Fatalf("visible sessions = %+v, want only beta", visible)
+	}
+}
+
+func TestAttachKeySetsAttachTarget(t *testing.T) {
+	m := NewModel(Options{Mode: ModeSimplified})
+	m.sessions = []Session{{Name: "alpha"}}
+	m.markSessionsChanged()
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(Model)
+	if got.AttachTarget() != "alpha" {
+		t.Fatalf("AttachTarget() = %q, want %q", got.AttachTarget(), "alpha")
+	}
+}
+
+func TestPaletteKeymapHelpShowsCtrlBindings(t *testing.T) {
+	m := NewModel(Options{Mode: ModeSimplified, Keymap: KeymapPalette})
+	m.width = 200
+
+	plain := stripStyleCodes(m.renderHelp())
+	if !strings.Contains(plain, "^d detach") || !strings.Contains(plain, "^x kill") || !strings.Contains(plain, "^o layout") {
+		t.Fatalf("renderHelp() = %q, want palette ctrl bindings", plain)
+	}
+}
+
+func TestToggleLayoutSwitchesModes(t *testing.T) {
+	m := NewModel(Options{Mode: ModeSimplified})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	got := updated.(Model)
+	if got.Options().Mode != ModeFull {
+		t.Fatalf("Mode = %v, want full after toggle", got.Options().Mode)
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	got = updated.(Model)
+	if got.Options().Mode != ModeSimplified {
+		t.Fatalf("Mode = %v, want simplified after second toggle", got.Options().Mode)
+	}
+}
+
+func TestSimplifiedViewCanHideHelp(t *testing.T) {
+	m := NewModel(Options{Mode: ModeSimplified, ShowHelp: false, ShowHelpSet: true})
+	m.width = 100
+	m.height = 24
+	m.sessions = []Session{{Name: "alpha", PID: "1"}}
+	m.markSessionsChanged()
+
+	view := stripStyleCodes(m.View().Content)
+	if strings.Contains(view, "attach") || strings.Contains(view, "detach") {
+		t.Fatalf("simplified view should hide help block: %q", view)
+	}
+}
+
+func TestSimplifiedOuterWidthIsCompact(t *testing.T) {
+	m := NewModel(Options{Mode: ModeSimplified})
+	m.width = 160
+	m.sessions = []Session{{Name: "alpha", PID: "1"}}
+	m.markSessionsChanged()
+
+	got := m.simplifiedOuterWidth()
+	if got > paletteMaxWidth {
+		t.Fatalf("simplifiedOuterWidth() = %d, want <= %d", got, paletteMaxWidth)
+	}
+	if got < paletteMinWidth {
+		t.Fatalf("simplifiedOuterWidth() = %d, want >= %d", got, paletteMinWidth)
+	}
+}
+
+func TestSimplifiedRowsHeightCapsVisibleRows(t *testing.T) {
+	m := NewModel(Options{Mode: ModeSimplified})
+	for i := 0; i < 20; i++ {
+		m.sessions = append(m.sessions, Session{Name: "s"})
+	}
+	m.markSessionsChanged()
+
+	if got := m.simplifiedRowsHeight(); got != paletteMaxRows {
+		t.Fatalf("simplifiedRowsHeight() = %d, want %d", got, paletteMaxRows)
+	}
+}
+
+func TestSimplifiedHelpWrapsToPickerWidth(t *testing.T) {
+	m := NewModel(Options{Mode: ModeSimplified, Keymap: KeymapPalette})
+	m.width = 160
+	m.sessions = []Session{{Name: "alpha", PID: "1"}}
+	m.markSessionsChanged()
+
+	outerWidth := m.simplifiedOuterWidth()
+	helpModel := m
+	helpModel.width = outerWidth
+	help := lipgloss.NewStyle().Width(outerWidth).Render(helpModel.renderHelp())
+	for _, line := range strings.Split(stripStyleCodes(help), "\n") {
+		if lipgloss.Width(line) > outerWidth {
+			t.Fatalf("help line width = %d, want <= %d: %q", lipgloss.Width(line), outerWidth, line)
+		}
 	}
 }
 

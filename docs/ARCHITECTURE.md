@@ -2,160 +2,249 @@
 
 ## Overview
 
-TSM manages persistent terminal sessions as background daemons. Each session owns a PTY, exposes a Unix socket, and tracks terminal state so clients can detach and later restore the same screen.
+TSM manages persistent terminal sessions as background daemons. Each session owns a PTY, exposes a Unix socket, and tracks enough terminal state to detach and later restore the same shell or full-screen application.
+
+At a high level:
+
+- one daemon per session
+- one PTY per session
+- zero pane/window management inside `tsm`
+- CLI and TUI are both thin clients over the same session daemons
 
 ## Process Model
 
-```text
-tsm attach <name>          tsm --daemon <name>
-┌─────────────┐            ┌─────────────────────────┐
-│   Client    │◄──unix───►│         Daemon          │
-│  (Attach)   │  socket   │  ┌───────────────────┐  │
-│ stdin→Input │           │  │    PTY master     │  │
-│ Output→tty  │           │  │         ↕         │  │
-└─────────────┘           │  │  shell / nvim /   │  │
-                          │  │   full-screen app │  │
-                          │  └───────────────────┘  │
-                          │  terminal backend       │
-                          │  socket listener        │
-                          └─────────────────────────┘
+```mermaid
+flowchart LR
+    C["tsm attach / tsm tui"] <-->|"Unix socket IPC"| D["session daemon"]
+    D --> P["PTY master"]
+    P --> A["shell / nvim / long-running command"]
+    D --> T["terminal backend"]
+    T --> S["attach snapshot + TUI preview"]
 ```
 
-- one daemon per session
-- daemon is spawned by re-exec with `--daemon`
-- daemon owns the PTY and accepts multiple attached clients
-- PTY output is fed into the terminal backend and broadcast to attached clients
+The daemon owns the PTY. Clients connect over the Unix socket, send input and resize messages, and receive terminal output plus restore data.
 
-## Package Structure
+## Session Lifecycle
 
-### `internal/session/`
+```mermaid
+flowchart TD
+    A["SpawnDaemon()"] --> B["re-exec as --daemon <name>"]
+    B --> C["create Unix socket"]
+    C --> D["start shell or custom command under PTY"]
+    D --> E["track PTY output in terminal backend"]
+    E --> F["serve attach, preview, rename, detach, kill requests"]
+```
+
+Sessions continue running after detach. Killing a client does not kill the session. Killing the session daemon does.
+
+## Package Layout
+
+### `internal/session`
 
 | File | Purpose |
 | --- | --- |
 | `config.go` | Socket directory resolution |
 | `socket.go` | Unix socket connect/read/write helpers |
-| `ipc.go` | Wire protocol tags and message framing |
+| `ipc.go` | Wire protocol tags and framing |
 | `session.go` | List, rename, kill, detach control helpers |
-| `daemon.go` | Daemon lifecycle, PTY, socket listener, attach/init handling |
+| `daemon.go` | Daemon lifecycle, PTY, socket listener, shell integration |
 | `client.go` | Interactive attach client, raw mode, resize handling, detach detection |
-| `termstate.go` | Terminal backend interface and mode-tracker fallback |
-| `terminal_backend_ghostty.go` | `libghostty-vt` backend |
-| `terminal_backend_default.go` | fallback backend behind `noghosttyvt` |
-| `switch.go` | local session-switch control sequence handling |
-| `scrollback.go` | raw PTY byte ring buffer used as fallback history |
+| `termstate.go` | Terminal backend interface and mode/state helpers |
+| `terminal_backend_ghostty.go` | Ghostty VT backend for screen restore and preview |
+| `switch.go` | Local session-switch control handling |
+| `scrollback.go` | Raw PTY byte ring buffer fallback history |
 
-### `internal/engine/`
+### `internal/engine`
 
 | File | Purpose |
 | --- | --- |
 | `sessions.go` | Higher-level session operations for the TUI |
-| `process.go` | Process-tree memory and uptime collection |
+| `process.go` | Process memory and uptime collection |
 | `preview.go` | ANSI-aware preview cropping and width handling |
 
-### `internal/tui/`
+### `internal/tui`
 
 | File | Purpose |
 | --- | --- |
-| `model_core.go` | TUI state and command wiring |
-| `model_input.go` | keyboard handling |
-| `model_view.go` | list / preview / log rendering |
-| `styles.go` | visual styles |
+| `model_core.go` | TUI state, message handling, command wiring |
+| `model_input.go` | Keyboard handling and TUI actions |
+| `model_view.go` | Full TUI and simplified palette rendering |
+| `bindings.go` | Key binding defaults, parsing, and overrides |
+| `options.go` | Mode and keymap selection |
+| `styles.go` | Lip Gloss styles |
+
+### `internal/appconfig`
+
+| File | Purpose |
+| --- | --- |
+| `config.go` | User config path resolution and TOML loading |
+| `template.go` | Install bundled default config into user config path |
+| `default_config.toml` | Embedded default config template |
 
 ### `main.go`
 
-CLI entrypoint and smart command behavior:
+`main.go` is the CLI entrypoint and command router. It also resolves TUI options from:
 
-- `attach` without a name: smart attach
-- `attach` from inside another session: local session switch
-- `detach` without a name: use `$TSM_SESSION`
-- `kill` without a name: use `$TSM_SESSION`
+1. built-in defaults
+2. config file
+3. environment
+4. CLI flags
 
 ## IPC Protocol
 
-Messages use a 5-byte header:
+All daemon communication uses a simple framed message format:
 
 ```text
 tag:u8 + length:u32(le) + payload
 ```
 
-Relevant tags:
+Important tags:
 
-- `Input` (0): client keystrokes to daemon PTY
-- `Output` (1): daemon PTY/restore output to client
-- `Resize` (2): terminal resize
+- `Input` (0): client keystrokes to PTY
+- `Output` (1): PTY output or restore output to client
+- `Resize` (2): client terminal resize
 - `Detach` (3): detach current client
-- `DetachAll` (4): detach all attached clients
-- `Kill` (5): kill session daemon/process
+- `DetachAll` (4): detach all clients
+- `Kill` (5): kill daemon and session process group
 - `Info` (6): session metadata
 - `Init` (7): initial attach handshake
-- `History` (8): TUI preview request
+- `History` (8): preview request
+- `Rename` (9): daemon-side rename request
 
-## Terminal Backend
+## Attach Flow
 
-### Default backend: `libghostty-vt`
+```mermaid
+sequenceDiagram
+    participant Client as "attach client"
+    participant Daemon as "session daemon"
+    participant Backend as "terminal backend"
+    participant PTY as "PTY app"
 
-The default build uses Ghostty's VT library to:
+    Client->>Daemon: Init(rows, cols)
+    Daemon->>Backend: Snapshot()
+    Backend-->>Daemon: VT restore data
+    Daemon-->>Client: Output(snapshot)
+    Daemon->>PTY: resize + signal foreground pgid
+    PTY-->>Daemon: redraw output
+    Daemon-->>Client: Output(redraw stream)
+    Client->>Daemon: Input / Resize / Detach
+```
+
+The important detail is ordering: snapshot first, resize second. That gives full-screen apps a chance to redraw correctly after the client restores the current terminal state.
+
+## Preview Flow
+
+```mermaid
+flowchart LR
+    TUI["TUI"] -->|"History request"| Daemon["daemon"]
+    Daemon --> Backend["terminal backend"]
+    Backend --> Preview["current styled screen"]
+    Preview --> TUI
+```
+
+The preview is not raw scrollback replay. On the Ghostty-backed build it comes from the terminal backend's current terminal state, which preserves styling and makes the preview match the live session much more closely.
+
+The Ghostty-backed build uses `libghostty-vt` to:
 
 - consume PTY output continuously
+- maintain the terminal state model
 - serialize a VT snapshot on attach
-- produce the current screen preview for the TUI
+- render the current screen for the TUI preview
 
-This is what makes Neovim/full-screen reattach work.
+This is the required backend for correct Neovim and other full-screen screen restoration.
 
-### Fallback backend: `noghosttyvt`
+## Shell Integration
 
-The fallback backend only tracks a small set of terminal modes:
+For default interactive shells, the daemon generates shell integration shims.
 
-- alt screen
-- mouse modes
-- bracketed paste
-- focus events
-- cursor visibility
+Supported shells:
 
-It can restore modes, but not exact screen contents.
+- `zsh`
+- `bash`
+- `fish`
 
-## Key Flows
+Each shim provides:
 
-### Session creation
+- prompt prefix like `[tsm:work]`
+- terminal title updates
+- `$TSM_SESSION`
+- `$TSM_SHELL_INTEGRATION`
+- `Ctrl+P` binding to open the simplified palette
 
-1. `SpawnDaemon()` re-execs the binary with `--daemon <name>`
-2. daemon creates/listens on the session socket
-3. daemon starts the shell under a PTY
-4. daemon injects `TSM_SESSION`
-5. for default `zsh`, daemon also generates a `ZDOTDIR` shim for prompt/title integration
+The integration is session-local. Fresh sessions pick up the current integration logic. Existing running sessions keep the shell environment they started with.
 
-### Attach
+## Rename Handling
 
-1. client enters raw mode
-2. client sends `Init` with current terminal size
-3. daemon sends a VT snapshot of current terminal state
-4. daemon resizes the PTY/backend and signals the foreground process group
-5. client relays PTY output until detach or disconnect
+Session rename is a daemon-side IPC operation, not just a socket filename rename.
 
-### Preview
+That matters because rename updates:
 
-1. TUI asks daemon for `History`
-2. daemon returns preview content from the terminal backend
-3. TUI keeps ANSI styling intact and crops horizontally with ANSI-aware width logic
+- the socket path
+- daemon session name state
+- shell integration session-name file
+- prompt/title rendering for fresh prompts
 
-### Session switch from inside a session
+Without daemon-side rename, the picker and shell prompt can drift out of sync.
 
-1. inner `tsm attach <other>` detects `$TSM_SESSION`
-2. it emits a private control sequence instead of nesting attach locally
-3. outer attach client intercepts that sequence
-4. outer client `exec`s into `tsm attach <other>`
+## TUI Modes
 
-## Environment Variables
+TSM has two TUI layouts:
 
-| Variable | Purpose |
-| --- | --- |
-| `TSM_DIR` | Override socket directory |
-| `TSM_SESSION` | Current session name inside attached shells |
-| `TSM_SHELL_INTEGRATION` | Shell integration mode, currently `zsh` |
-| `SHELL` | Default shell used for new sessions |
+- `full`: list + preview + activity log
+- `simplified`: centered list-only palette
+
+They share the same action model:
+
+- attach
+- detach
+- kill
+- rename
+- copy attach command
+- new session
+- refresh
+- sort
+- filter
+
+The active keymap applies identically to both layouts.
+
+## TUI Config Resolution
+
+Config precedence:
+
+1. built-in defaults from `internal/tui/bindings.go`
+2. `~/.config/tsm/config.toml`
+3. environment variables
+4. CLI flags
+
+Supported environment overrides:
+
+- `TSM_TUI_MODE`
+- `TSM_TUI_KEYMAP`
+- `TSM_CONFIG_FILE`
+
+Supported config behaviors:
+
+- choose default layout: `full` or `simplified`
+- choose default keymap: `default` or `palette`
+- hide help: `show_help = false`
+- override bindings per action under `[tui.keymaps.default]` and `[tui.keymaps.palette]`
+
+## Local Session Switch
+
+When `tsm attach other-session` is run from inside an already attached session, TSM does not open a nested attach inside the current PTY.
+
+Instead:
+
+1. the inner CLI detects `$TSM_SESSION`
+2. it emits a private local switch control sequence
+3. the outer attach client intercepts it
+4. the client reconnects to the target session
+
+This is what makes palette-based switching from inside an attached session work like a real session switch instead of a nested terminal.
 
 ## Release Model
 
-- source builds require `libghostty-vt` available via `pkg-config`
-- `make setup-ghostty-vt` vendors Ghostty locally into the repo
-- `make release` produces a self-contained archive bundling `tsm` and `libghostty-vt`
+- bundled release archives ship `tsm` plus `libghostty-vt`
+- Homebrew installs the bundled release artifacts
+- source builds require `libghostty-vt` via `pkg-config`
+- `make release` produces a self-contained current-platform archive

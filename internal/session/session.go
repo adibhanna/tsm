@@ -80,15 +80,30 @@ func ListSessions(cfg Config) ([]Session, error) {
 // RenameSession renames a session by renaming its socket file.
 func RenameSession(cfg Config, oldName, newName string) error {
 	oldPath := cfg.SocketPath(oldName)
-	newPath := cfg.SocketPath(newName)
-
 	if !IsSocket(oldPath) {
 		return fmt.Errorf("session %q not found", oldName)
 	}
-	if IsSocket(newPath) {
-		return fmt.Errorf("session %q already exists", newName)
+
+	conn, err := Connect(oldPath)
+	if err != nil {
+		return err
 	}
-	return os.Rename(oldPath, newPath)
+	defer conn.Close()
+
+	if err := SendMessage(conn, TagRename, []byte(newName)); err != nil {
+		return err
+	}
+	tag, payload, err := ReadMessage(conn, ioTimeout)
+	if err != nil {
+		return err
+	}
+	if tag != TagAck {
+		return fmt.Errorf("unexpected response tag: %s", tag)
+	}
+	if len(payload) > 0 {
+		return errors.New(string(payload))
+	}
+	return nil
 }
 
 // KillSession sends a kill message to the named session.

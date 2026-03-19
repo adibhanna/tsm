@@ -32,6 +32,7 @@ const (
 	TagHistory   Tag = 8
 	TagRun       Tag = 9
 	TagAck       Tag = 10
+	TagRename    Tag = 11
 )
 
 func (t Tag) String() string {
@@ -58,6 +59,8 @@ func (t Tag) String() string {
 		return "Run"
 	case TagAck:
 		return "Ack"
+	case TagRename:
+		return "Rename"
 	}
 	return fmt.Sprintf("Tag(%d)", t)
 }

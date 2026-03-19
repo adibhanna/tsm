@@ -5,9 +5,10 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 APP=${APP:-tsm}
 GHOSTTY_PREFIX=${GHOSTTY_PREFIX:-"$ROOT/.ghostty-prefix"}
 DIST_DIR=${DIST_DIR:-"$ROOT/dist"}
-VERSION=${VERSION:-$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo dev)}
+VERSION=${VERSION:-$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null || echo dev)}
 COMMIT=${COMMIT:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo none)}
 DATE=${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+DIRTY=${DIRTY:-false}
 if [[ "$COMMIT" != "none" ]]; then
   COMMIT=$(printf '%s' "$COMMIT" | cut -c1-7)
 fi
@@ -63,12 +64,14 @@ mkdir -p "$STAGE"
   env \
     PKG_CONFIG_PATH="$PKG_PATH" \
     go build \
-      -ldflags "-s -w -X main.version=$VERSION -X main.commit=$COMMIT -X main.date=$DATE -linkmode external -extldflags -Wl,-rpath,${rpath}" \
+      -ldflags "-s -w -X main.version=$VERSION -X main.commit=$COMMIT -X main.date=$DATE -X main.dirty=$DIRTY -linkmode external -extldflags -Wl,-rpath,${rpath}" \
       -o "$STAGE/$APP" .
 )
 
 cp -a "${libs[@]}" "$STAGE/"
 cp "$ROOT/README.md" "$STAGE/"
+mkdir -p "$STAGE/config/tsm"
+cp "$ROOT/config/tsm/config.toml" "$STAGE/config/tsm/"
 tar -C "$DIST_DIR" -czf "$ARCHIVE" "$(basename "$STAGE")"
 
 echo "$ARCHIVE"

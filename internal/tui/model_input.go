@@ -14,11 +14,32 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleConfirmKey(msg)
 	}
 
-	if isQuit(msg) {
+	if m.isQuitKey(msg) {
 		return m, tea.Quit
 	}
 
 	m.handleLogScroll(msg)
+
+	if m.inlineFilterEnabled() {
+		if msg.Code == tea.KeyEscape {
+			if m.filterText == "" {
+				return m, tea.Quit
+			}
+			m.filterText = ""
+			m.markVisibleChanged()
+			m.cursor = 0
+			m.listOffset = 0
+			return m, nil
+		}
+		if msg.Code == tea.KeyBackspace && m.filterText != "" {
+			m.filterText = m.filterText[:len(m.filterText)-1]
+			m.markVisibleChanged()
+			m.pruneSelections()
+			m.cursor = 0
+			m.listOffset = 0
+			return m, nil
+		}
+	}
 
 	// Escape or Backspace clears active filter in normal mode
 	if (msg.Code == tea.KeyEscape || msg.Code == tea.KeyBackspace) && m.filterText != "" {
@@ -32,13 +53,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	visible := m.visibleSessions()
 
 	// Ctrl+A toggles select all
-	if msg.Code == 'a' && msg.Mod.Contains(tea.ModCtrl) {
+	if m.isToggleSelectAllKey(msg) {
 		m.toggleSelectAll(visible)
 		return m, nil
 	}
 
-	switch msg.Code {
-	case tea.KeyUp:
+	switch {
+	case m.isMoveUpKey(msg):
 		if m.cursor > 0 {
 			m.cursor--
 			m.previewScrollX = 0
@@ -46,7 +67,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.previewCmd()
 		}
 
-	case tea.KeyDown:
+	case m.isMoveDownKey(msg):
 		if m.cursor < len(visible)-1 {
 			m.cursor++
 			m.previewScrollX = 0
@@ -54,7 +75,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.previewCmd()
 		}
 
-	case tea.KeyLeft:
+	case m.isMoveLeftKey(msg):
 		if m.previewScrollX > 0 {
 			m.previewScrollX -= 4
 			if m.previewScrollX < 0 {
@@ -62,7 +83,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case tea.KeyRight:
+	case m.isMoveRightKey(msg):
 		maxW := previewMaxWidth(m.preview)
 		limit := maxW - m.previewInnerWidth()
 		if limit < 0 {
@@ -74,7 +95,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.previewScrollX = limit
 		}
 
-	case tea.KeySpace:
+	case m.isToggleSelectKey(msg):
 		if m.cursor < len(visible) {
 			name := visible[m.cursor].Name
 			if m.selected[name] {
@@ -84,58 +105,75 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case tea.KeyEnter:
+	case m.isAttachKey(msg):
 		if m.cursor < len(visible) {
 			m.attachTarget = visible[m.cursor].Name
 			return m, tea.Quit
 		}
 
 	default:
-		if msg.Text != "" {
-			switch msg.Text {
-			case "k":
-				targets := m.killTargets()
-				if len(targets) > 0 {
-					m.state = stateConfirmKill
-				}
-			case "c":
-				if m.cursor < len(visible) {
-					name := visible[m.cursor].Name
-					text := fmt.Sprintf("tsm attach %s", name)
-					if err := engine.CopyToClipboard(text); err != nil {
-						m.status = fmt.Sprintf("Copy failed: %v", err)
-						m.addLog(confirmStyle.Render(fmt.Sprintf("  ✗ Copy failed: %v", err)))
-					} else {
-						m.status = "Copied!"
-						m.addLog(statusStyle.Render(fmt.Sprintf("  Copied: %s", text)))
-					}
-					return m, clearStatusAfter(2 * time.Second)
-				}
-			case "n":
-				m.state = stateNewSession
-				m.newSessionName = ""
-			case "R":
-				if m.cursor < len(visible) {
-					m.state = stateRenameSession
-					m.renameOldName = visible[m.cursor].Name
-					m.renameNewName = visible[m.cursor].Name
-				}
-			case "r":
-				return m, fetchSessionsCmd
-			case "/":
-				m.state = stateFilter
-			case "s":
-				if m.sortAsc {
-					m.sortAsc = false
-				} else {
-					m.sortAsc = true
-					m.sortMode = (m.sortMode + 1) % sortModeCount
-				}
-				m.markVisibleChanged()
-				m.cursor = 0
-				m.listOffset = 0
-				return m, m.previewCmd()
+		switch {
+		case m.isKillKey(msg):
+			targets := m.killTargets()
+			if len(targets) > 0 {
+				m.state = stateConfirmKill
 			}
+		case m.isDetachKey(msg):
+			targets := m.detachTargets()
+			if len(targets) == 0 {
+				return m, nil
+			}
+			m.addLog(titleStyle.Render(fmt.Sprintf("Detaching %d session(s)...", len(targets))))
+			cmds := make([]tea.Cmd, 0, len(targets))
+			for _, name := range targets {
+				cmds = append(cmds, detachOneCmd(name))
+			}
+			return m, tea.Batch(cmds...)
+		case m.isCopyKey(msg):
+			if m.cursor < len(visible) {
+				name := visible[m.cursor].Name
+				text := fmt.Sprintf("tsm attach %s", name)
+				if err := engine.CopyToClipboard(text); err != nil {
+					m.status = fmt.Sprintf("Copy failed: %v", err)
+					m.addLog(confirmStyle.Render(fmt.Sprintf("  ✗ Copy failed: %v", err)))
+				} else {
+					m.status = "Copied!"
+					m.addLog(statusStyle.Render(fmt.Sprintf("  Copied: %s", text)))
+				}
+				return m, clearStatusAfter(2 * time.Second)
+			}
+		case m.isNewKey(msg):
+			m.state = stateNewSession
+			m.newSessionName = ""
+		case m.isRenameKey(msg):
+			if m.cursor < len(visible) {
+				m.state = stateRenameSession
+				m.renameOldName = visible[m.cursor].Name
+				m.renameNewName = visible[m.cursor].Name
+			}
+		case m.isRefreshKey(msg):
+			return m, fetchSessionsCmd
+		case m.isFilterKey(msg):
+			m.state = stateFilter
+		case m.isSortKey(msg):
+			if m.sortAsc {
+				m.sortAsc = false
+			} else {
+				m.sortAsc = true
+				m.sortMode = (m.sortMode + 1) % sortModeCount
+			}
+			m.markVisibleChanged()
+			m.cursor = 0
+			m.listOffset = 0
+			return m, m.previewCmd()
+		case m.isToggleLayoutKey(msg):
+			return m, m.toggleLayout()
+		case m.inlineFilterEnabled() && m.isTextInput(msg):
+			m.filterText += msg.Text
+			m.markVisibleChanged()
+			m.pruneSelections()
+			m.cursor = 0
+			m.listOffset = 0
 		}
 	}
 
@@ -179,7 +217,7 @@ func (m *Model) pruneSelections() {
 }
 
 func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if isQuit(msg) {
+	if m.isQuitKey(msg) {
 		return m, tea.Quit
 	}
 
@@ -239,7 +277,7 @@ func (m Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleNewSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if isQuit(msg) {
+	if m.isQuitKey(msg) {
 		return m, tea.Quit
 	}
 
@@ -283,7 +321,7 @@ func (m Model) handleNewSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleRenameSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if isQuit(msg) {
+	if m.isQuitKey(msg) {
 		return m, tea.Quit
 	}
 
@@ -327,7 +365,7 @@ func (m Model) handleRenameSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 }
 
 func (m Model) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if isQuit(msg) {
+	if m.isQuitKey(msg) {
 		return m, tea.Quit
 	}
 	if msg.Code == tea.KeyEscape || msg.Code == tea.KeyBackspace {
@@ -373,23 +411,26 @@ func (m Model) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleLogScroll(msg tea.KeyPressMsg) {
-	if !isRune(msg, "[") && !isRune(msg, "]") {
+	if m.isSimplified() {
+		return
+	}
+	if !m.matchesAction(ActionLogUp, msg) && !m.matchesAction(ActionLogDown, msg) {
 		return
 	}
 	maxOffset := len(m.logLines) - logContentHeight
 	if maxOffset < 0 {
 		maxOffset = 0
 	}
-	if isRune(msg, "[") && m.logOffset > 0 {
+	if m.matchesAction(ActionLogUp, msg) && m.logOffset > 0 {
 		m.logOffset--
 	}
-	if isRune(msg, "]") && m.logOffset < maxOffset {
+	if m.matchesAction(ActionLogDown, msg) && m.logOffset < maxOffset {
 		m.logOffset++
 	}
 }
 
 func (m *Model) ensureVisible() {
-	h := m.mainContentHeight(1)
+	h := m.listContentHeight(1)
 	if h <= 0 {
 		return
 	}

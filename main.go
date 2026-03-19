@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/adibhanna/tsm/internal/appconfig"
 	"github.com/adibhanna/tsm/internal/session"
 	"github.com/adibhanna/tsm/internal/tui"
 )
@@ -20,6 +21,7 @@ var (
 	version = "dev"
 	commit  = "none"
 	date    = "unknown"
+	dirty   = "false"
 )
 
 func main() {
@@ -41,11 +43,15 @@ func main() {
 
 	switch cmd {
 	case "":
-		launchTUI()
+		launchTUI(mustResolveTUIOptions(nil))
 	case "list", "l", "ls":
 		cmdList()
 	case "tui":
-		launchTUI()
+		launchTUI(mustResolveTUIOptions(os.Args[2:]))
+	case "palette", "p":
+		launchTUI(mustResolveTUIOptions([]string{"--simplified"}))
+	case "config":
+		cmdConfig()
 	case "attach", "a":
 		cmdAttach()
 	case "detach", "d":
@@ -57,7 +63,7 @@ func main() {
 	case "kill", "k":
 		cmdKill()
 	case "version", "v", "-v", "--version":
-		fmt.Printf("tsm %s (%s, %s) backend=%s\n", version, commit, date, session.RestoreBackendName())
+		fmt.Println(versionString(session.RestoreBackendName()))
 	case "help", "h", "-h", "--help":
 		printUsage()
 	default:
@@ -97,7 +103,7 @@ func cmdAttach() {
 			fmt.Fprintf(os.Stdout, "\r\n[detached from %s]\r\n", name)
 			return
 		default:
-			launchTUI()
+			launchTUI(mustResolveTUIOptions(nil))
 			return
 		}
 	}
@@ -121,6 +127,36 @@ func cmdAttach() {
 	fmt.Fprintf(os.Stdout, "\r\n[detached from %s]\r\n", name)
 }
 
+func cmdConfig() {
+	if len(os.Args) < 3 {
+		printConfigUsage()
+		os.Exit(1)
+	}
+
+	switch os.Args[2] {
+	case "install":
+		force := false
+		for _, arg := range os.Args[3:] {
+			switch arg {
+			case "--force", "-f":
+				force = true
+			default:
+				fmt.Fprintf(os.Stderr, "tsm config install: unknown option %q\n", arg)
+				os.Exit(1)
+			}
+		}
+		path, err := appconfig.InstallDefault(os.Getenv, force)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Config install error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Installed config at %s\n", path)
+	default:
+		printConfigUsage()
+		os.Exit(1)
+	}
+}
+
 func emitLocalSwitchRequest(target string) bool {
 	current := os.Getenv("TSM_SESSION")
 	if current == "" {
@@ -139,6 +175,30 @@ func execAttachTarget(name string) error {
 		return err
 	}
 	return syscall.Exec(exe, []string{exe, "attach", name}, os.Environ())
+}
+
+func runAttachTarget(name string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.Command(exe, "attach", name)
+	cmd.Env = os.Environ()
+
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err == nil {
+		defer tty.Close()
+		cmd.Stdin = tty
+		cmd.Stdout = tty
+		cmd.Stderr = tty
+	} else {
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+
+	return cmd.Run()
 }
 
 func attachSession(cfg session.Config, name string, createIfMissing bool) error {
@@ -329,8 +389,100 @@ func resolveKillTargets(args []string) []string {
 	return nil
 }
 
-func launchTUI() {
-	p := tea.NewProgram(tui.NewModel())
+func mustResolveTUIOptions(args []string) tui.Options {
+	opts, err := resolveTUIOptions(args, os.Getenv)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "TUI option error: %v\n", err)
+		os.Exit(1)
+	}
+	return opts
+}
+
+func resolveTUIOptions(args []string, getenv func(string) string) (tui.Options, error) {
+	cfg, err := appconfig.Load(getenv)
+	if err != nil {
+		return tui.Options{}, err
+	}
+	return resolveTUIOptionsWithConfig(args, getenv, cfg)
+}
+
+func resolveTUIOptionsWithConfig(args []string, getenv func(string) string, cfg appconfig.Config) (tui.Options, error) {
+	opts := tui.Options{}
+
+	if raw := cfg.TUI.Mode; raw != "" {
+		mode, err := tui.ParseMode(raw)
+		if err != nil {
+			return tui.Options{}, err
+		}
+		opts.Mode = mode
+	}
+	if raw := cfg.TUI.Keymap; raw != "" {
+		keymap, err := tui.ParseKeymap(raw)
+		if err != nil {
+			return tui.Options{}, err
+		}
+		opts.Keymap = keymap
+	}
+	if cfg.TUI.ShowHelp != nil {
+		opts.ShowHelp = *cfg.TUI.ShowHelp
+		opts.ShowHelpSet = true
+	}
+
+	if raw := getenv("TSM_TUI_MODE"); raw != "" {
+		mode, err := tui.ParseMode(raw)
+		if err != nil {
+			return tui.Options{}, err
+		}
+		opts.Mode = mode
+	}
+	if raw := getenv("TSM_TUI_KEYMAP"); raw != "" {
+		keymap, err := tui.ParseKeymap(raw)
+		if err != nil {
+			return tui.Options{}, err
+		}
+		opts.Keymap = keymap
+	}
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--simplified":
+			opts.Mode = tui.ModeSimplified
+		case arg == "--full":
+			opts.Mode = tui.ModeFull
+		case arg == "--keymap":
+			if i+1 >= len(args) {
+				return tui.Options{}, fmt.Errorf("--keymap requires a value")
+			}
+			i++
+			keymap, err := tui.ParseKeymap(args[i])
+			if err != nil {
+				return tui.Options{}, err
+			}
+			opts.Keymap = keymap
+		case strings.HasPrefix(arg, "--keymap="):
+			keymap, err := tui.ParseKeymap(strings.TrimPrefix(arg, "--keymap="))
+			if err != nil {
+				return tui.Options{}, err
+			}
+			opts.Keymap = keymap
+		default:
+			return tui.Options{}, fmt.Errorf("unknown tui option %q", arg)
+		}
+	}
+
+	opts = tui.NormalizeOptions(opts)
+	bindings, err := tui.BuildBindings(opts.Keymap, cfg.TUI.Keymaps[opts.Keymap.String()])
+	if err != nil {
+		return tui.Options{}, err
+	}
+	opts.Bindings = bindings
+
+	return tui.NormalizeOptions(opts), nil
+}
+
+func launchTUI(opts tui.Options) {
+	p := tea.NewProgram(tui.NewModel(opts))
 	finalModel, err := p.Run()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -338,17 +490,11 @@ func launchTUI() {
 	}
 
 	// If the user pressed Enter to attach, connect via native IPC.
-	if m, ok := finalModel.(tui.Model); ok && m.AttachTarget() != "" {
-		exe, err := os.Executable()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Resolve executable error: %v\n", err)
-			os.Exit(1)
-		}
-		cmd := exec.Command(exe, "attach", m.AttachTarget())
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
+	type attachTargeter interface {
+		AttachTarget() string
+	}
+	if m, ok := finalModel.(attachTargeter); ok && m.AttachTarget() != "" {
+		if err := runAttachTarget(m.AttachTarget()); err != nil {
 			fmt.Fprintf(os.Stderr, "Attach error: %v\n", err)
 			os.Exit(1)
 		}
@@ -360,7 +506,10 @@ func printUsage() {
 
 Usage:
   tsm                      Open interactive TUI (default)
-  tsm tui                  Open interactive TUI
+  tsm tui [--simplified] [--keymap default|palette]
+                           Open interactive TUI
+  tsm palette              Open simplified session palette
+  tsm config install       Install default config into ~/.config/tsm/config.toml
   tsm attach [name]        Attach to session (smart attach if omitted)
   tsm detach [name]        Detach current or named session
   tsm new <name> [cmd...]  Create a new session
@@ -371,10 +520,78 @@ Usage:
   tsm help                 Show this help
 
 Aliases:
-  attach=a  detach=d  new=n  list=l,ls  rename=mv  kill=k  version=v  help=h
+  palette=p  attach=a  detach=d  new=n  list=l,ls  rename=mv  kill=k  version=v  help=h
 
 Detach from a session with Ctrl+\
+
+TUI env:
+  TSM_TUI_MODE=full|simplified
+  TSM_TUI_KEYMAP=default|palette
+  TSM_CONFIG_FILE=~/.config/tsm/config.toml
 `)
+}
+
+func printConfigUsage() {
+	fmt.Print(`tsm config
+
+Usage:
+  tsm config install [--force]
+`)
+}
+
+func versionString(backend string) string {
+	parts := []string{"tsm", normalizedVersion()}
+	if meta := versionMetadata(); meta != "" {
+		parts = append(parts, meta)
+	}
+	parts = append(parts, "backend="+backend)
+	return strings.Join(parts, " ")
+}
+
+func normalizedVersion() string {
+	v := strings.TrimSpace(version)
+	if v == "" || v == "unknown" || v == "none" {
+		return "dev"
+	}
+	return v
+}
+
+func versionMetadata() string {
+	var items []string
+	if c := shortCommit(commit); c != "" {
+		items = append(items, "commit "+c)
+	}
+	if isDirtyBuild() {
+		items = append(items, "dirty")
+	}
+	if builtAt := strings.TrimSpace(date); builtAt != "" && builtAt != "unknown" {
+		items = append(items, "built "+builtAt)
+	}
+	if len(items) == 0 {
+		return ""
+	}
+	return "(" + strings.Join(items, ", ") + ")"
+}
+
+func shortCommit(c string) string {
+	c = strings.TrimSpace(c)
+	switch c {
+	case "", "none", "unknown":
+		return ""
+	}
+	if len(c) > 7 {
+		return c[:7]
+	}
+	return c
+}
+
+func isDirtyBuild() bool {
+	switch strings.ToLower(strings.TrimSpace(dirty)) {
+	case "1", "true", "yes", "dirty":
+		return true
+	default:
+		return false
+	}
 }
 
 func formatUptime(createdAt uint64) string {

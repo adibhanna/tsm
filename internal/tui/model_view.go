@@ -82,11 +82,22 @@ func (m Model) View() tea.View {
 		return v
 	}
 
+	if m.isSimplified() {
+		return m.simplifiedView()
+	}
+	return m.fullView()
+}
+
+func (m Model) fullView() tea.View {
 	visible := m.visibleSessions()
 
 	// Compute help first so we know its height for layout
-	help := m.renderHelp()
-	helpLines := strings.Count(help, "\n") + 1
+	help := ""
+	helpLines := 0
+	if m.showHelp() {
+		help = m.renderHelp()
+		helpLines = strings.Count(help, "\n") + 1
+	}
 	ch := m.mainContentHeight(helpLines)
 
 	// --- List pane ---
@@ -144,7 +155,65 @@ func (m Model) View() tea.View {
 
 	logPane = replaceTopBorder(logPane, buildTopBorder(" Activity Log ", m.width))
 
-	full := lipgloss.JoinVertical(lipgloss.Left, body, logPane, help)
+	full := lipgloss.JoinVertical(lipgloss.Left, body, logPane)
+	if help != "" {
+		full = lipgloss.JoinVertical(lipgloss.Left, full, help)
+	}
+	v := tea.NewView(clampLines(full, m.height))
+	v.AltScreen = true
+	return v
+}
+
+func (m Model) simplifiedView() tea.View {
+	outerWidth := m.simplifiedOuterWidth()
+	innerWidth := outerWidth - 2
+	if innerWidth < 20 {
+		innerWidth = 20
+	}
+	help := ""
+	if m.showHelp() {
+		helpModel := m
+		helpModel.width = outerWidth
+		help = helpModel.renderHelp()
+	}
+
+	queryLabel := "> "
+	queryText := m.filterText
+	if queryText == "" {
+		if m.inlineFilterEnabled() {
+			queryText = "type to filter sessions"
+		} else {
+			queryText = "press / to filter"
+		}
+	}
+	queryLine := helpKeyStyle.Render(queryLabel) + helpStyle.Render(queryText)
+	if m.filterText != "" {
+		queryLine = helpKeyStyle.Render(queryLabel) + helpKeyStyle.Render(m.filterText)
+	}
+
+	rowsHeight := m.simplifiedRowsHeight()
+	contentHeight := rowsHeight + 1
+	listContent := clampLines(m.renderPaletteList(rowsHeight, innerWidth), rowsHeight)
+	bodyContent := clampLines(queryLine+"\n"+listContent, contentHeight)
+
+	titleLeft := " sessions "
+	titleRight := ""
+
+	pane := listBorderStyle.
+		Width(outerWidth).
+		Height(contentHeight + 2).
+		Render(bodyContent)
+	pane = replaceTopBorder(pane, buildTopBorderLRStyled(titleLeft, titleRight, outerWidth, sortStyle))
+	if selCount := len(m.selected); selCount > 0 {
+		pane = replaceBottomBorder(pane, buildBottomBorderR(fmt.Sprintf(" %d sel ", selCount), outerWidth))
+	}
+
+	full := centerBlock(pane, m.width)
+	if help != "" {
+		helpBlock := lipgloss.NewStyle().Width(outerWidth).Render(help)
+		full = lipgloss.JoinVertical(lipgloss.Left, full, centerBlock(helpBlock, m.width))
+	}
+	full = centerVertically(full, m.height)
 	v := tea.NewView(clampLines(full, m.height))
 	v.AltScreen = true
 	return v
@@ -260,6 +329,74 @@ func (m *Model) renderList(maxRows int) string {
 	return b.String()
 }
 
+func (m *Model) renderPaletteList(maxRows, innerWidth int) string {
+	visible := m.visibleSessions()
+	if len(visible) == 0 {
+		if m.filterText != "" {
+			return normalStyle.Render("  No matches.")
+		}
+		return normalStyle.Render("  No sessions found.")
+	}
+
+	metrics := m.visibleMetrics
+	var b strings.Builder
+
+	end := m.listOffset + maxRows
+	if end > len(visible) {
+		end = len(visible)
+	}
+
+	for i := m.listOffset; i < end; i++ {
+		s := visible[i]
+		isCursor := i == m.cursor
+		isSelected := m.selected[s.Name]
+
+		indicator := "  "
+		switch {
+		case isCursor && isSelected:
+			indicator = selectedStyle.Render("▸●")
+		case isCursor:
+			indicator = selectedStyle.Render("▸ ")
+		case isSelected:
+			indicator = selectedStyle.Render(" ●")
+		}
+
+		clientLabel := inactiveClientStyle.Render(padLeft("○0", metrics.clientW))
+		if s.Clients > 0 {
+			clientLabel = activeClientStyle.Render(padLeft(fmt.Sprintf("●%d", s.Clients), metrics.clientW))
+		}
+
+		uptimeLabel := "-"
+		if s.Uptime > 0 {
+			uptimeLabel = engine.FormatUptime(s.Uptime)
+		}
+		uptimeStr := uptimeStyle.Render(padLeft(uptimeLabel, metrics.uptimeW))
+
+		nameWidth := innerWidth - 5 - metrics.uptimeW - metrics.clientW
+		if nameWidth < 12 {
+			nameWidth = 12
+		}
+		style := normalStyle
+		if isCursor || isSelected {
+			style = selectedStyle
+		}
+		name := truncate(s.Name, nameWidth)
+		paddedName := padRight(name, nameWidth)
+		styledName := style.Render(paddedName)
+		if m.filterText != "" {
+			styledName = highlightMatch(paddedName, m.filterText, style, filterMatchStyle)
+		}
+
+		row := fmt.Sprintf("%s%s %s %s", indicator, styledName, uptimeStr, clientLabel)
+		b.WriteString(row)
+		if i < end-1 {
+			b.WriteString("\n")
+		}
+	}
+
+	return b.String()
+}
+
 func (m Model) renderHelp() string {
 	if m.state == stateNewSession {
 		cursor := "█"
@@ -284,26 +421,32 @@ func (m Model) renderHelp() string {
 		return confirmStyle.Render(fmt.Sprintf(" Kill %d sessions? y/n ", len(targets)))
 	}
 
+	if m.isSimplified() {
+		return m.renderSimplifiedHelp()
+	}
+
 	parts := []string{
-		helpKeyStyle.Render("←→") + helpStyle.Render(" scroll"),
-		helpKeyStyle.Render("↑↓") + helpStyle.Render(" nav"),
-		helpKeyStyle.Render("space") + helpStyle.Render(" sel"),
-		helpKeyStyle.Render("^a") + helpStyle.Render(" all"),
-		helpKeyStyle.Render("enter") + helpStyle.Render(" attach"),
-		helpKeyStyle.Render("n") + helpStyle.Render(" new"),
-		helpKeyStyle.Render("k") + helpStyle.Render(" kill"),
-		helpKeyStyle.Render("R") + helpStyle.Render(" rename"),
-		helpKeyStyle.Render("c") + helpStyle.Render(" copy cmd"),
-		helpKeyStyle.Render("s") + helpStyle.Render(" sort"),
+		helpKeyStyle.Render(m.previewScrollKeyLabel()) + helpStyle.Render(" scroll"),
+		helpKeyStyle.Render(m.navKeyLabel()) + helpStyle.Render(" nav"),
+		helpKeyStyle.Render(m.selectKeyLabel()) + helpStyle.Render(" sel"),
+		helpKeyStyle.Render(m.selectAllKeyLabel()) + helpStyle.Render(" all"),
+		helpKeyStyle.Render(m.attachKeyLabel()) + helpStyle.Render(" attach"),
+		helpKeyStyle.Render(m.detachKeyLabel()) + helpStyle.Render(" detach"),
+		helpKeyStyle.Render(m.newKeyLabel()) + helpStyle.Render(" new"),
+		helpKeyStyle.Render(m.killKeyLabel()) + helpStyle.Render(" kill"),
+		helpKeyStyle.Render(m.renameKeyLabel()) + helpStyle.Render(" rename"),
+		helpKeyStyle.Render(m.copyKeyLabel()) + helpStyle.Render(" copy cmd"),
+		helpKeyStyle.Render(m.sortKeyLabel()) + helpStyle.Render(" sort"),
+		helpKeyStyle.Render(m.toggleLayoutKeyLabel()) + helpStyle.Render(" layout"),
 	}
 	if m.filterText != "" {
 		parts = append(parts, helpKeyStyle.Render("esc")+helpStyle.Render(" clear"))
 	} else {
-		parts = append(parts, helpKeyStyle.Render("/")+helpStyle.Render(" filter"))
+		parts = append(parts, helpKeyStyle.Render(m.filterKeyLabel())+helpStyle.Render(" filter"))
 	}
 	parts = append(parts,
-		helpKeyStyle.Render("[]")+helpStyle.Render(" log"),
-		helpKeyStyle.Render("q")+helpStyle.Render(" quit"),
+		helpKeyStyle.Render(m.logScrollKeyLabel())+helpStyle.Render(" log"),
+		helpKeyStyle.Render(m.quitKeyLabel())+helpStyle.Render(" quit"),
 	)
 
 	if m.status != "" {
@@ -311,6 +454,117 @@ func (m Model) renderHelp() string {
 	}
 
 	return wrapHelpParts(parts, m.width)
+}
+
+func (m Model) renderSimplifiedHelp() string {
+	items := []string{
+		helpKeyStyle.Render(m.navKeyLabel()) + helpStyle.Render(" nav"),
+		helpKeyStyle.Render(m.selectKeyLabel()) + helpStyle.Render(" sel"),
+		helpKeyStyle.Render(m.selectAllKeyLabel()) + helpStyle.Render(" all"),
+		helpKeyStyle.Render(m.attachKeyLabel()) + helpStyle.Render(" attach"),
+		helpKeyStyle.Render(m.detachKeyLabel()) + helpStyle.Render(" detach"),
+		helpKeyStyle.Render(m.newKeyLabel()) + helpStyle.Render(" new"),
+		helpKeyStyle.Render(m.renameKeyLabel()) + helpStyle.Render(" rename"),
+		helpKeyStyle.Render(m.copyKeyLabel()) + helpStyle.Render(" copy cmd"),
+		helpKeyStyle.Render(m.toggleLayoutKeyLabel()) + helpStyle.Render(" layout"),
+		helpKeyStyle.Render(m.killKeyLabel()) + helpStyle.Render(" kill"),
+		helpKeyStyle.Render(m.sortKeyLabel()) + helpStyle.Render(" sort"),
+		helpKeyStyle.Render(m.refreshKeyLabel()) + helpStyle.Render(" refresh"),
+	}
+
+	if m.inlineFilterEnabled() {
+		items = append(items,
+			helpKeyStyle.Render("type")+helpStyle.Render(" to filter"),
+			helpKeyStyle.Render("esc")+helpStyle.Render(" clear/quit"),
+		)
+	} else if m.filterText != "" {
+		items = append(items,
+			helpKeyStyle.Render("esc")+helpStyle.Render(" clear"),
+			helpKeyStyle.Render(m.quitKeyLabel())+helpStyle.Render(" quit"),
+		)
+	} else {
+		items = append(items,
+			helpKeyStyle.Render(m.filterKeyLabel())+helpStyle.Render(" filter"),
+			helpKeyStyle.Render(m.quitKeyLabel())+helpStyle.Render(" quit"),
+		)
+	}
+	lines := wrapHelpColumns(items, 2)
+	if m.status != "" {
+		lines = append(lines, " "+statusStyle.Render(m.status))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) simplifiedOuterWidth() int {
+	metrics := m.visibleMetrics
+	nameW := metrics.nameW
+	if nameW < 16 {
+		nameW = 16
+	}
+	if nameW > 24 {
+		nameW = 24
+	}
+
+	titleMin := 48
+	rowWidth := 2 + nameW + 1 + metrics.uptimeW + 1 + metrics.clientW + 2
+	w := max(titleMin, rowWidth)
+	if w < paletteMinWidth {
+		w = paletteMinWidth
+	}
+	if w > paletteMaxWidth {
+		w = paletteMaxWidth
+	}
+	if maxW := m.width - 8; maxW > 0 && w > maxW {
+		w = maxW
+	}
+	if w < 20 {
+		w = min(m.width, 20)
+	}
+	return w
+}
+
+func centerBlock(s string, width int) string {
+	lines := strings.Split(s, "\n")
+	maxW := 0
+	for _, line := range lines {
+		if w := lipgloss.Width(line); w > maxW {
+			maxW = w
+		}
+	}
+	if width <= maxW {
+		return s
+	}
+	pad := strings.Repeat(" ", (width-maxW)/2)
+	for i, line := range lines {
+		lines[i] = pad + line
+	}
+	return strings.Join(lines, "\n")
+}
+
+func centerVertically(s string, height int) string {
+	if height <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) >= height {
+		return s
+	}
+	padTop := (height - len(lines)) / 2
+	if padTop <= 0 {
+		return s
+	}
+	return strings.Repeat("\n", padTop) + s
+}
+
+func (m Model) simplifiedRowsHeight() int {
+	rows := len(m.visibleSessions())
+	if rows < 1 {
+		rows = 1
+	}
+	if rows > paletteMaxRows {
+		rows = paletteMaxRows
+	}
+	return rows
 }
 
 // wrapHelpParts joins help items with wrapping at maxWidth.
@@ -340,6 +594,55 @@ func wrapHelpParts(parts []string, maxWidth int) string {
 	}
 	lines = append(lines, line)
 	return strings.Join(lines, "\n")
+}
+
+func wrapHelpColumns(items []string, columns int) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	if columns < 1 {
+		columns = 1
+	}
+	rows := (len(items) + columns - 1) / columns
+	colWidths := make([]int, columns)
+	grid := make([][]string, columns)
+	for col := 0; col < columns; col++ {
+		start := col * rows
+		if start >= len(items) {
+			break
+		}
+		end := min(start+rows, len(items))
+		grid[col] = items[start:end]
+		for _, item := range grid[col] {
+			if w := lipgloss.Width(item); w > colWidths[col] {
+				colWidths[col] = w
+			}
+		}
+	}
+
+	lines := make([]string, 0, rows)
+	for row := 0; row < rows; row++ {
+		cols := make([]string, 0, columns)
+		for col := 0; col < columns; col++ {
+			if row >= len(grid[col]) {
+				continue
+			}
+			item := grid[col][row]
+			if col < columns-1 && colWidths[col] > 0 {
+				item = padRightANSI(item, colWidths[col])
+			}
+			cols = append(cols, item)
+		}
+		lines = append(lines, " "+strings.Join(cols, "   "))
+	}
+	return lines
+}
+
+func padRightANSI(s string, width int) string {
+	if gap := width - lipgloss.Width(s); gap > 0 {
+		return s + strings.Repeat(" ", gap)
+	}
+	return s
 }
 
 // Border helpers

@@ -17,7 +17,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}} -X main.date={{.Date}}
+      - -s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}} -X main.date={{.Date}} -X main.dirty=false
 
 archives:
   - ids:
@@ -26,6 +26,8 @@ archives:
     files:
       - README.md
       - LICENSE
+      - src: config/tsm/config.toml
+        dst: config/tsm
       - src: .ghostty-prefix/lib/libghostty-vt*.dylib
         dst: .
       - src: .ghostty-prefix/lib/libghostty-vt*.so*

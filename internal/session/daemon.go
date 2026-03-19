@@ -46,6 +46,8 @@ type Daemon struct {
 
 	done     chan struct{}
 	doneOnce sync.Once
+
+	sessionNameFile string
 }
 
 type clientState struct {
@@ -78,7 +80,11 @@ func StartDaemon(name string, shellCmd []string) error {
 	defer os.Remove(sockPath)
 
 	// Determine shell command.
-	shell, argv := resolveShell(shellCmd)
+	shell := resolveShellPath(shellCmd)
+	argv, err := resolveShellArgs(cfg, name, shell, shellCmd)
+	if err != nil {
+		return fmt.Errorf("resolve shell args: %w", err)
+	}
 
 	cmd := exec.Command(shell)
 	cmd.Args = argv // Override so argv[0] can be "-zsh" for login shells.
@@ -102,16 +108,17 @@ func StartDaemon(name string, shellCmd []string) error {
 	}
 
 	d := &Daemon{
-		name:       name,
-		cfg:        cfg,
-		cmd:        cmd,
-		ptmx:       ptmx,
-		listener:   ln,
-		scrollback: NewScrollback(scrollbackSize),
-		terminal:   NewTerminalBackend(uint16(rows), uint16(cols)),
-		createdAt:  time.Now(),
-		clients:    make(map[net.Conn]*clientState),
-		done:       make(chan struct{}),
+		name:            name,
+		cfg:             cfg,
+		cmd:             cmd,
+		ptmx:            ptmx,
+		listener:        ln,
+		scrollback:      NewScrollback(scrollbackSize),
+		terminal:        NewTerminalBackend(uint16(rows), uint16(cols)),
+		createdAt:       time.Now(),
+		clients:         make(map[net.Conn]*clientState),
+		done:            make(chan struct{}),
+		sessionNameFile: sessionNameFilePath(cfg, shellIntegrationMode(shell, shellCmd), name),
 	}
 	defer d.terminal.Close()
 
@@ -306,11 +313,54 @@ func (d *Daemon) handleClient(conn net.Conn) {
 			d.closeAllClients()
 			return
 
+		case TagRename:
+			newName := strings.TrimSpace(string(payload))
+			var renameErr string
+			if newName == "" {
+				renameErr = "empty session name"
+			} else if err := d.renameSession(newName); err != nil {
+				renameErr = err.Error()
+			}
+			d.sendMessage(conn, TagAck, []byte(renameErr), ioTimeout)
+			if renameErr == "" {
+				if pgrp, err := getForegroundPgrp(d.ptmx); err == nil && pgrp > 0 {
+					syscall.Kill(-pgrp, syscall.SIGWINCH)
+				}
+				time.Sleep(10 * time.Millisecond)
+				d.ptmx.Write([]byte{0x0c})
+			}
+
 		case TagRun:
 			// For now, just acknowledge.
 			d.sendMessage(conn, TagAck, nil, ioTimeout)
 		}
 	}
+}
+
+func (d *Daemon) renameSession(newName string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if newName == d.name {
+		return nil
+	}
+
+	oldPath := d.cfg.SocketPath(d.name)
+	newPath := d.cfg.SocketPath(newName)
+	if _, err := os.Lstat(newPath); err == nil {
+		return fmt.Errorf("session %q already exists", newName)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("check target session path: %w", err)
+	}
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return fmt.Errorf("rename socket: %w", err)
+	}
+	if err := writeSessionNameFile(d.sessionNameFile, newName); err != nil {
+		_ = os.Rename(newPath, oldPath)
+		return fmt.Errorf("update session name file: %w", err)
+	}
+	d.name = newName
+	return nil
 }
 
 func (d *Daemon) broadcast(tag Tag, data []byte) {
@@ -423,21 +473,33 @@ func (c *clientState) writeMessage(conn net.Conn, msg []byte, timeout time.Durat
 	return err
 }
 
-// resolveShell determines the shell command to run.
-// Returns (executable path, full argv). For a default login shell
-// argv[0] is "-zsh"/"-bash"/etc., which the shell interprets as
-// "I am a login shell". For explicit commands argv is passed through.
-func resolveShell(shellCmd []string) (string, []string) {
+// resolveShellPath determines the executable to run.
+func resolveShellPath(shellCmd []string) string {
 	if len(shellCmd) > 0 {
-		return shellCmd[0], shellCmd
+		return shellCmd[0]
 	}
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
 	}
-	// Login shell: argv[0] starts with "-"
-	argv0 := "-" + shell[strings.LastIndex(shell, "/")+1:]
-	return shell, []string{argv0}
+	return shell
+}
+
+// resolveShellArgs determines the argv used to start the shell.
+func resolveShellArgs(cfg Config, name, shell string, shellCmd []string) ([]string, error) {
+	if len(shellCmd) > 0 {
+		return shellCmd, nil
+	}
+
+	base := filepath.Base(shell)
+	switch shellIntegrationMode(shell, shellCmd) {
+	case "bash":
+		return []string{base, "--rcfile", bashRcFilePath(cfg, name), "-i"}, nil
+	case "fish":
+		return []string{base, "-i"}, nil
+	default:
+		return []string{"-" + base}, nil
+	}
 }
 
 func buildDaemonEnv(cfg Config, name, shell string, shellCmd []string) ([]string, error) {
@@ -445,8 +507,11 @@ func buildDaemonEnv(cfg Config, name, shell string, shellCmd []string) ([]string
 	for _, e := range os.Environ() {
 		switch {
 		case strings.HasPrefix(e, "TSM_SESSION="):
+		case strings.HasPrefix(e, "TSM_SESSION_FILE="):
 		case strings.HasPrefix(e, "ZDOTDIR="):
 		case strings.HasPrefix(e, "TSM_ORIG_ZDOTDIR="):
+		case strings.HasPrefix(e, "XDG_CONFIG_HOME="):
+		case strings.HasPrefix(e, "TSM_ORIG_XDG_CONFIG_HOME="):
 		case strings.HasPrefix(e, "TSM_SHELL_INTEGRATION="):
 		default:
 			env = append(env, e)
@@ -454,7 +519,8 @@ func buildDaemonEnv(cfg Config, name, shell string, shellCmd []string) ([]string
 	}
 	env = append(env, "TSM_SESSION="+name)
 
-	if shouldUseZshIntegration(shell, shellCmd) {
+	switch mode := shellIntegrationMode(shell, shellCmd); mode {
+	case "zsh":
 		dir, err := ensureZshIntegration(cfg, name)
 		if err != nil {
 			return nil, err
@@ -467,23 +533,56 @@ func buildDaemonEnv(cfg Config, name, shell string, shellCmd []string) ([]string
 			env = append(env, "TSM_ORIG_ZDOTDIR="+origZdotdir)
 		}
 		env = append(env, "ZDOTDIR="+dir)
+		env = append(env, "TSM_SESSION_FILE="+sessionNameFilePath(cfg, mode, name))
 		env = append(env, "TSM_SHELL_INTEGRATION=zsh")
+	case "bash":
+		if err := ensureBashIntegration(cfg, name); err != nil {
+			return nil, err
+		}
+		env = append(env, "TSM_SESSION_FILE="+sessionNameFilePath(cfg, mode, name))
+		env = append(env, "TSM_SHELL_INTEGRATION=bash")
+	case "fish":
+		dir, err := ensureFishIntegration(cfg, name)
+		if err != nil {
+			return nil, err
+		}
+		origXDG := os.Getenv("XDG_CONFIG_HOME")
+		if origXDG == "" {
+			home, _ := os.UserHomeDir()
+			if home != "" {
+				origXDG = filepath.Join(home, ".config")
+			}
+		}
+		if origXDG != "" {
+			env = append(env, "TSM_ORIG_XDG_CONFIG_HOME="+origXDG)
+		}
+		env = append(env, "XDG_CONFIG_HOME="+dir)
+		env = append(env, "TSM_SESSION_FILE="+sessionNameFilePath(cfg, mode, name))
+		env = append(env, "TSM_SHELL_INTEGRATION=fish")
 	}
 
 	return env, nil
 }
 
-func shouldUseZshIntegration(shell string, shellCmd []string) bool {
+func shellIntegrationMode(shell string, shellCmd []string) string {
 	if len(shellCmd) > 0 {
-		return false
+		return ""
 	}
-	return filepath.Base(shell) == "zsh"
+	switch filepath.Base(shell) {
+	case "zsh", "bash", "fish":
+		return filepath.Base(shell)
+	default:
+		return ""
+	}
 }
 
 func ensureZshIntegration(cfg Config, name string) (string, error) {
-	dir := filepath.Join(cfg.SocketDir, ".zsh", name)
+	dir := shellIntegrationDir(cfg, "zsh", name)
 	if err := os.MkdirAll(dir, 0750); err != nil {
 		return "", fmt.Errorf("mkdir zsh integration dir: %w", err)
+	}
+	if err := writeSessionNameFile(sessionNameFilePath(cfg, "zsh", name), name); err != nil {
+		return "", err
 	}
 
 	files := map[string]string{
@@ -503,6 +602,57 @@ func ensureZshIntegration(cfg Config, name string) (string, error) {
 	return dir, nil
 }
 
+func ensureBashIntegration(cfg Config, name string) error {
+	dir := shellIntegrationDir(cfg, "bash", name)
+	if err := os.MkdirAll(dir, 0750); err != nil {
+		return fmt.Errorf("mkdir bash integration dir: %w", err)
+	}
+	if err := writeSessionNameFile(sessionNameFilePath(cfg, "bash", name), name); err != nil {
+		return err
+	}
+	if err := os.WriteFile(bashRcFilePath(cfg, name), []byte(bashRcShim), 0640); err != nil {
+		return fmt.Errorf("write %s: %w", bashRcFilePath(cfg, name), err)
+	}
+	return nil
+}
+
+func ensureFishIntegration(cfg Config, name string) (string, error) {
+	dir := shellIntegrationDir(cfg, "fish", name)
+	configDir := filepath.Join(dir, "fish")
+	if err := os.MkdirAll(configDir, 0750); err != nil {
+		return "", fmt.Errorf("mkdir fish integration dir: %w", err)
+	}
+	if err := writeSessionNameFile(sessionNameFilePath(cfg, "fish", name), name); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.fish"), []byte(fishConfigShim), 0640); err != nil {
+		return "", fmt.Errorf("write fish config: %w", err)
+	}
+	return dir, nil
+}
+
+func shellIntegrationDir(cfg Config, shell, name string) string {
+	return filepath.Join(cfg.SocketDir, "."+shell, name)
+}
+
+func bashRcFilePath(cfg Config, name string) string {
+	return filepath.Join(shellIntegrationDir(cfg, "bash", name), ".bashrc")
+}
+
+func sessionNameFilePath(cfg Config, shell, name string) string {
+	return filepath.Join(shellIntegrationDir(cfg, shell, name), ".tsm-session-name")
+}
+
+func writeSessionNameFile(path, name string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
+		return fmt.Errorf("mkdir session name dir: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(name+"\n"), 0640); err != nil {
+		return fmt.Errorf("write session name file %s: %w", path, err)
+	}
+	return nil
+}
+
 const zshEnvShim = `if [[ -n "${TSM_ORIG_ZDOTDIR:-}" && -f "${TSM_ORIG_ZDOTDIR}/.zshenv" ]]; then
   source "${TSM_ORIG_ZDOTDIR}/.zshenv"
 fi
@@ -518,22 +668,49 @@ const zshRcShim = `if [[ -n "${TSM_ORIG_ZDOTDIR:-}" && -f "${TSM_ORIG_ZDOTDIR}/.
 fi
 
 if [[ -n "${TSM_SESSION:-}" ]]; then
-  typeset -g _tsm_prompt_marker="[tsm:${TSM_SESSION}]"
-  case "${PROMPT:-}" in
-    *"${_tsm_prompt_marker}"*) ;;
-    *)
-      PROMPT="%F{6}${_tsm_prompt_marker}%f ${PROMPT:-%# }"
-      ;;
-  esac
-
   autoload -Uz add-zsh-hook
+  typeset -g _tsm_prompt_marker=""
+
+  _tsm_refresh_session_name() {
+    if [[ -n "${TSM_SESSION_FILE:-}" && -f "${TSM_SESSION_FILE}" ]]; then
+      local _tsm_name
+      _tsm_name=$(<"${TSM_SESSION_FILE}")
+      _tsm_name=${_tsm_name//$'\n'/}
+      if [[ -n "${_tsm_name}" ]]; then
+        export TSM_SESSION="${_tsm_name}"
+      fi
+    fi
+  }
+
+  _tsm_apply_prompt_marker() {
+    local _tsm_new_marker="[tsm:${TSM_SESSION}]"
+    if [[ -n "${_tsm_prompt_marker}" && "${PROMPT:-}" == *"${_tsm_prompt_marker}"* ]]; then
+      PROMPT="${PROMPT/${_tsm_prompt_marker}/${_tsm_new_marker}}"
+    elif [[ "${PROMPT:-}" != *"${_tsm_new_marker}"* ]]; then
+      PROMPT="%F{6}${_tsm_new_marker}%f ${PROMPT:-%# }"
+    fi
+    _tsm_prompt_marker="${_tsm_new_marker}"
+  }
+
   _tsm_precmd_title() {
+    _tsm_refresh_session_name
+    _tsm_apply_prompt_marker
     print -Pn -- "\e]2;tsm:${TSM_SESSION} %~\a"
   }
   if (( ${precmd_functions[(Ie)_tsm_precmd_title]} == 0 )); then
     add-zsh-hook precmd _tsm_precmd_title
   fi
   _tsm_precmd_title
+
+  if [[ -o interactive ]]; then
+    _tsm_session_palette() {
+      zle -I
+      tsm tui --simplified
+      zle reset-prompt
+    }
+    zle -N _tsm_session_palette
+    bindkey '^P' _tsm_session_palette
+  fi
 fi
 `
 
@@ -545,6 +722,121 @@ fi
 const zshLogoutShim = `if [[ -n "${TSM_ORIG_ZDOTDIR:-}" && -f "${TSM_ORIG_ZDOTDIR}/.zlogout" ]]; then
   source "${TSM_ORIG_ZDOTDIR}/.zlogout"
 fi
+`
+
+const bashRcShim = `if [[ -f /etc/profile ]]; then
+  source /etc/profile
+fi
+
+if [[ -f "${HOME}/.bash_profile" ]]; then
+  source "${HOME}/.bash_profile"
+elif [[ -f "${HOME}/.bash_login" ]]; then
+  source "${HOME}/.bash_login"
+elif [[ -f "${HOME}/.profile" ]]; then
+  source "${HOME}/.profile"
+elif [[ -f "${HOME}/.bashrc" ]]; then
+  source "${HOME}/.bashrc"
+fi
+
+if [[ -n "${TSM_SESSION:-}" ]]; then
+  _tsm_prompt_marker=""
+
+  _tsm_refresh_session_name() {
+    if [[ -n "${TSM_SESSION_FILE:-}" && -f "${TSM_SESSION_FILE}" ]]; then
+      local _tsm_name
+      IFS= read -r _tsm_name < "${TSM_SESSION_FILE}"
+      if [[ -n "${_tsm_name}" ]]; then
+        export TSM_SESSION="${_tsm_name}"
+      fi
+    fi
+  }
+
+  _tsm_apply_prompt_marker() {
+    local _tsm_new_marker="[tsm:${TSM_SESSION}]"
+    if [[ -n "${_tsm_prompt_marker}" && "${PS1:-}" == *"${_tsm_prompt_marker}"* ]]; then
+      PS1="${PS1/${_tsm_prompt_marker}/${_tsm_new_marker}}"
+    elif [[ "${PS1:-}" != *"${_tsm_new_marker}"* ]]; then
+      PS1="\[\e[36m\]${_tsm_new_marker}\[\e[0m\] ${PS1:-\\$ }"
+    fi
+    _tsm_prompt_marker="${_tsm_new_marker}"
+  }
+
+  _tsm_precmd() {
+    _tsm_refresh_session_name
+    _tsm_apply_prompt_marker
+    printf '\033]2;tsm:%s %s\007' "${TSM_SESSION}" "${PWD/#${HOME}/~}"
+  }
+
+  case ";${PROMPT_COMMAND:-};" in
+    *";_tsm_precmd;"*) ;;
+    *)
+      if [[ -n "${PROMPT_COMMAND:-}" ]]; then
+        PROMPT_COMMAND="_tsm_precmd;${PROMPT_COMMAND}"
+      else
+        PROMPT_COMMAND="_tsm_precmd"
+      fi
+      ;;
+  esac
+  _tsm_precmd
+
+  bind -x '"\C-p":"tsm p"'
+fi
+`
+
+const fishConfigShim = `if set -q TSM_ORIG_XDG_CONFIG_HOME
+  set -l _tsm_fish_root "$TSM_ORIG_XDG_CONFIG_HOME"
+else
+  set -l _tsm_fish_root "$HOME/.config"
+end
+
+set -l _tsm_user_config "$_tsm_fish_root/fish/config.fish"
+if test -f "$_tsm_user_config"
+  source "$_tsm_user_config"
+end
+
+if set -q TSM_SESSION
+  function __tsm_refresh_session_name
+    if test -n "$TSM_SESSION_FILE"; and test -f "$TSM_SESSION_FILE"
+      set -l _tsm_name (string trim (cat "$TSM_SESSION_FILE"))
+      if test -n "$_tsm_name"
+        set -gx TSM_SESSION "$_tsm_name"
+      end
+    end
+  end
+
+  function __tsm_prompt_marker
+    set_color cyan
+    echo -n "[tsm:$TSM_SESSION] "
+    set_color normal
+  end
+
+  if functions -q fish_prompt
+    functions -c fish_prompt __tsm_orig_fish_prompt
+    function fish_prompt
+      __tsm_refresh_session_name
+      __tsm_prompt_marker
+      __tsm_orig_fish_prompt
+    end
+  else
+    function fish_prompt
+      __tsm_refresh_session_name
+      __tsm_prompt_marker
+      echo -n "> "
+    end
+  end
+
+  function __tsm_update_title --on-event fish_prompt
+    __tsm_refresh_session_name
+    printf '\e]2;tsm:%s %s\a' "$TSM_SESSION" (prompt_pwd)
+  end
+
+  function __tsm_session_palette
+    commandline -f repaint
+    tsm p
+    commandline -f repaint
+  end
+  bind \cp __tsm_session_palette
+end
 `
 
 // putUint16LE, putUint32LE, putUint64LE write little-endian integers.

@@ -6,7 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/adibhanna/tsm/internal/appconfig"
 	"github.com/adibhanna/tsm/internal/session"
+	"github.com/adibhanna/tsm/internal/tui"
 )
 
 func TestSuggestSessionNameUsesCurrentDirectory(t *testing.T) {
@@ -127,5 +130,177 @@ func TestResolveKillTargetsPrefersExplicitNames(t *testing.T) {
 	got := resolveKillTargets([]string{"tsm", "kill", "one", "two"})
 	if len(got) != 2 || got[0] != "one" || got[1] != "two" {
 		t.Fatalf("resolveKillTargets = %#v, want [one two]", got)
+	}
+}
+
+func TestResolveTUIOptionsSimplifiedFlag(t *testing.T) {
+	opts, err := resolveTUIOptions([]string{"--simplified"}, func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("resolveTUIOptions: %v", err)
+	}
+	if opts.Mode != tui.ModeSimplified {
+		t.Fatalf("Mode = %v, want simplified", opts.Mode)
+	}
+	if opts.Keymap != tui.KeymapDefault {
+		t.Fatalf("Keymap = %v, want default", opts.Keymap)
+	}
+}
+
+func TestResolveTUIOptionsUsesGlobalEnv(t *testing.T) {
+	env := func(key string) string {
+		switch key {
+		case "TSM_TUI_MODE":
+			return "simplified"
+		case "TSM_TUI_KEYMAP":
+			return "palette"
+		default:
+			return ""
+		}
+	}
+
+	opts, err := resolveTUIOptions(nil, env)
+	if err != nil {
+		t.Fatalf("resolveTUIOptions: %v", err)
+	}
+	if opts.Mode != tui.ModeSimplified {
+		t.Fatalf("Mode = %v, want simplified", opts.Mode)
+	}
+	if opts.Keymap != tui.KeymapPalette {
+		t.Fatalf("Keymap = %v, want palette", opts.Keymap)
+	}
+}
+
+func TestResolveTUIOptionsUsesConfigDefaults(t *testing.T) {
+	showHelp := false
+	cfg := appconfig.Config{
+		TUI: appconfig.TUIConfig{
+			Mode:     "simplified",
+			Keymap:   "palette",
+			ShowHelp: &showHelp,
+		},
+	}
+
+	opts, err := resolveTUIOptionsWithConfig(nil, func(string) string { return "" }, cfg)
+	if err != nil {
+		t.Fatalf("resolveTUIOptionsWithConfig: %v", err)
+	}
+	if opts.Mode != tui.ModeSimplified {
+		t.Fatalf("Mode = %v, want simplified", opts.Mode)
+	}
+	if opts.Keymap != tui.KeymapPalette {
+		t.Fatalf("Keymap = %v, want palette", opts.Keymap)
+	}
+	if opts.ShowHelp {
+		t.Fatal("ShowHelp = true, want false from config")
+	}
+}
+
+func TestResolveTUIOptionsExplicitKeymapOverridesEnv(t *testing.T) {
+	env := func(key string) string {
+		switch key {
+		case "TSM_TUI_MODE":
+			return "full"
+		case "TSM_TUI_KEYMAP":
+			return "default"
+		default:
+			return ""
+		}
+	}
+
+	opts, err := resolveTUIOptions([]string{"--keymap=palette"}, env)
+	if err != nil {
+		t.Fatalf("resolveTUIOptions: %v", err)
+	}
+	if opts.Mode != tui.ModeFull {
+		t.Fatalf("Mode = %v, want full", opts.Mode)
+	}
+	if opts.Keymap != tui.KeymapPalette {
+		t.Fatalf("Keymap = %v, want palette", opts.Keymap)
+	}
+}
+
+func TestResolveTUIOptionsAppliesConfigBindingsForSelectedKeymap(t *testing.T) {
+	cfg := appconfig.Config{
+		TUI: appconfig.TUIConfig{
+			Keymap: "default",
+			Keymaps: map[string]map[string][]string{
+				"default": {
+					"detach": []string{"x"},
+				},
+				"palette": {},
+			},
+		},
+	}
+
+	opts, err := resolveTUIOptionsWithConfig(nil, func(string) string { return "" }, cfg)
+	if err != nil {
+		t.Fatalf("resolveTUIOptionsWithConfig: %v", err)
+	}
+	msg := tea.KeyPressMsg{Text: "x"}
+	if !opts.Bindings.Matches(tui.ActionDetach, msg) {
+		t.Fatal("expected config detach override to be applied")
+	}
+}
+
+func TestResolveTUIOptionsCLIKeymapSelectsMatchingConfigOverrides(t *testing.T) {
+	cfg := appconfig.Config{
+		TUI: appconfig.TUIConfig{
+			Keymap: "default",
+			Keymaps: map[string]map[string][]string{
+				"default": {
+					"detach": []string{"x"},
+				},
+				"palette": {
+					"detach": []string{"ctrl+k"},
+				},
+			},
+		},
+	}
+
+	opts, err := resolveTUIOptionsWithConfig([]string{"--keymap=palette"}, func(string) string { return "" }, cfg)
+	if err != nil {
+		t.Fatalf("resolveTUIOptionsWithConfig: %v", err)
+	}
+	if !opts.Bindings.Matches(tui.ActionDetach, tea.KeyPressMsg{Text: "k", Mod: tea.ModCtrl}) {
+		t.Fatal("expected palette detach override to be applied")
+	}
+	if opts.Bindings.Matches(tui.ActionDetach, tea.KeyPressMsg{Text: "x"}) {
+		t.Fatal("unexpected default-keymap detach override leaked into palette bindings")
+	}
+}
+
+func TestVersionStringForDevBuild(t *testing.T) {
+	prevVersion, prevCommit, prevDate, prevDirty := version, commit, date, dirty
+	t.Cleanup(func() {
+		version, commit, date, dirty = prevVersion, prevCommit, prevDate, prevDirty
+	})
+
+	version = "dev"
+	commit = "9d35718"
+	date = "2026-03-19T15:28:20Z"
+	dirty = "true"
+
+	got := versionString("libghostty-vt")
+	want := "tsm dev (commit 9d35718, dirty, built 2026-03-19T15:28:20Z) backend=libghostty-vt"
+	if got != want {
+		t.Fatalf("versionString() = %q, want %q", got, want)
+	}
+}
+
+func TestVersionStringForReleaseBuild(t *testing.T) {
+	prevVersion, prevCommit, prevDate, prevDirty := version, commit, date, dirty
+	t.Cleanup(func() {
+		version, commit, date, dirty = prevVersion, prevCommit, prevDate, prevDirty
+	})
+
+	version = "v0.4.0"
+	commit = "9d35718"
+	date = "2026-03-19T15:28:20Z"
+	dirty = "false"
+
+	got := versionString("libghostty-vt")
+	want := "tsm v0.4.0 (commit 9d35718, built 2026-03-19T15:28:20Z) backend=libghostty-vt"
+	if got != want {
+		t.Fatalf("versionString() = %q, want %q", got, want)
 	}
 }

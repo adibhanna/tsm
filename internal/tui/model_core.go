@@ -16,6 +16,9 @@ import (
 const (
 	listMaxOuterWidth = 56
 	logContentHeight  = 4
+	paletteMaxWidth   = 68
+	paletteMinWidth   = 46
+	paletteMaxRows    = 8
 )
 
 type state int
@@ -76,6 +79,11 @@ type killOneResultMsg struct {
 	err  error
 }
 
+type detachOneResultMsg struct {
+	name string
+	err  error
+}
+
 type processInfoMsg struct {
 	info map[string]engine.ProcessInfo
 }
@@ -131,6 +139,13 @@ func killOneCmd(name string) tea.Cmd {
 	}
 }
 
+func detachOneCmd(name string) tea.Cmd {
+	return func() tea.Msg {
+		err := engine.DetachSession(name)
+		return detachOneResultMsg{name: name, err: err}
+	}
+}
+
 func clearStatusAfter(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg {
 		return statusClearMsg{}
@@ -140,6 +155,8 @@ func clearStatusAfter(d time.Duration) tea.Cmd {
 // Model
 
 type Model struct {
+	options Options
+
 	sessions   []Session
 	cursor     int
 	listOffset int
@@ -183,6 +200,7 @@ type listMetrics struct {
 
 func initialModel() Model {
 	return Model{
+		options:           NormalizeOptions(Options{}),
 		selected:          make(map[string]bool),
 		sortAsc:           true,
 		visibleCacheDirty: true,
@@ -190,12 +208,36 @@ func initialModel() Model {
 	}
 }
 
-func NewModel() Model {
-	return initialModel()
+func NewModel(opts ...Options) Model {
+	m := initialModel()
+	if len(opts) > 0 {
+		m.options = NormalizeOptions(opts[0])
+	}
+	return m
 }
 
 func (m Model) AttachTarget() string {
 	return m.attachTarget
+}
+
+func (m Model) Options() Options {
+	return NormalizeOptions(m.options)
+}
+
+func (m Model) isSimplified() bool {
+	return NormalizeOptions(m.options).Mode == ModeSimplified
+}
+
+func (m Model) keymap() Keymap {
+	return NormalizeOptions(m.options).Keymap
+}
+
+func (m Model) inlineFilterEnabled() bool {
+	return m.keymap() == KeymapPalette
+}
+
+func (m Model) showHelp() bool {
+	return NormalizeOptions(m.options).ShowHelp
 }
 
 // visibleSessions returns sessions matching the current filter, sorted by sortMode.
@@ -331,6 +373,17 @@ func (m *Model) addLog(line string) {
 	m.logOffset = maxOff
 }
 
+func (m Model) listContentHeight(helpLines int) int {
+	if m.isSimplified() {
+		h := m.height - helpLines - 4
+		if h < 3 {
+			h = 3
+		}
+		return h
+	}
+	return m.mainContentHeight(helpLines)
+}
+
 // clampCursor ensures cursor and listOffset are valid for the visible list.
 func (m *Model) clampCursor() {
 	visible := m.visibleSessions()
@@ -353,7 +406,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		visible := m.visibleSessions()
-		if m.cursor < len(visible) {
+		if !m.isSimplified() && m.cursor < len(visible) {
 			return m, m.previewCmd()
 		}
 
@@ -376,7 +429,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clampCursor()
 		cmds := []tea.Cmd{fetchProcessInfoCmd(m.sessions)}
 		visible := m.visibleSessions()
-		if len(visible) > 0 && m.cursor < len(visible) {
+		if !m.isSimplified() && len(visible) > 0 && m.cursor < len(visible) {
 			cmds = append(cmds, m.previewCmd())
 		} else {
 			m.preview = ""
@@ -413,6 +466,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
 			return fetchSessionsCmd()
 		})
+
+	case detachOneResultMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("Detach failed: %v", msg.err)
+			m.addLog(confirmStyle.Render(fmt.Sprintf("  ✗ Detach %s: %v", msg.name, msg.err)))
+			return m, tea.Batch(fetchSessionsCmd, clearStatusAfter(3*time.Second))
+		}
+		m.status = fmt.Sprintf("Detached %s", msg.name)
+		m.addLog(statusStyle.Render(fmt.Sprintf("  ✓ Detached: %s", msg.name)))
+		return m, tea.Batch(fetchSessionsCmd, clearStatusAfter(3*time.Second))
 
 	case renameSessionMsg:
 		if msg.err != nil {
@@ -454,6 +517,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) previewCmd() tea.Cmd {
+	if m.isSimplified() {
+		return nil
+	}
 	visible := m.visibleSessions()
 	if m.cursor >= len(visible) {
 		return nil
@@ -462,6 +528,14 @@ func (m *Model) previewCmd() tea.Cmd {
 }
 
 func (m *Model) killTargets() []string {
+	return m.actionTargets()
+}
+
+func (m *Model) detachTargets() []string {
+	return m.actionTargets()
+}
+
+func (m *Model) actionTargets() []string {
 	if len(m.selected) > 0 {
 		names := make([]string, 0, len(m.selected))
 		for name := range m.selected {
@@ -474,4 +548,19 @@ func (m *Model) killTargets() []string {
 		return []string{visible[m.cursor].Name}
 	}
 	return nil
+}
+
+func (m *Model) toggleLayout() tea.Cmd {
+	opts := NormalizeOptions(m.options)
+	if opts.Mode == ModeSimplified {
+		opts.Mode = ModeFull
+	} else {
+		opts.Mode = ModeSimplified
+	}
+	m.options = opts
+	if m.isSimplified() {
+		m.preview = ""
+		return nil
+	}
+	return m.previewCmd()
 }

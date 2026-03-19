@@ -22,6 +22,11 @@ func KillSession(name string) error {
 	return session.KillSession(session.DefaultConfig(), name)
 }
 
+// DetachSession disconnects all attached clients from the named session.
+func DetachSession(name string) error {
+	return session.DetachSession(session.DefaultConfig(), name)
+}
+
 // RenameSession renames a session.
 func RenameSession(oldName, newName string) error {
 	return session.RenameSession(session.DefaultConfig(), oldName, newName)

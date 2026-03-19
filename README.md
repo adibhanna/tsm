@@ -1,26 +1,95 @@
 # tsm
 
-A terminal session manager with persistent PTY-backed sessions, a TUI, and Ghostty-powered screen restoration.
+`tsm` is a terminal session manager. It keeps shell sessions alive as background daemons, lets you detach and reattach later, and restores terminal state without turning the project into a tmux clone.
 
-## What It Does
+It is built around a simple model:
 
-- Creates long-lived shell sessions as background daemons
-- Reattaches full-screen apps like Neovim using Ghostty's VT engine
-- Shows a live colored preview of the current screen in the TUI
-- Lets you switch sessions from inside another attached session
-- Supports detach and kill control commands from inside the current session
+- one daemon per session
+- one PTY per session
+- no panes, windows, or tabs inside `tsm`
+- fast switching between named sessions from the CLI or TUI
+
+For full-screen terminal apps like Neovim, the preferred build uses Ghostty's VT engine so reattach can restore the visible screen instead of only restoring terminal modes.
+
+## Screenshots
+
+Full TUI:
+
+![Full TUI](assets/tui.png)
+
+Simplified session palette:
+
+![Simplified Palette](assets/simplified.png)
+
+Compact help layout:
+
+![Shortcut Help](assets/help.png)
+
+## Why TSM
+
+`tsm` is for people who want persistent terminal sessions without adopting tmux's window and pane model.
+
+Use it when you want:
+
+- a long-lived shell or editor per project
+- fast switching between sessions
+- detach / reattach from anywhere
+- a command-palette-style session picker
+- full-screen restore for Neovim and similar apps on the Ghostty-backed build
+
+Do not expect `tsm` to manage splits. Splits belong to your shell app or your terminal:
+
+- use Ghostty splits for multiple visible terminals
+- use Neovim splits for editor layout
+- use multiple `tsm` sessions for multiple long-lived work contexts
 
 ## Install
 
-### Prebuilt releases
+There are two supported install tracks.
 
-Release archives are self-contained. They bundle `tsm` together with `libghostty-vt`, so users do not need to install Ghostty separately.
+| Install path | Backend | Best for |
+| --- | --- | --- |
+| Release archive | `libghostty-vt` | Best restore quality, recommended for most users |
+| Homebrew | `libghostty-vt` | Managed installs and upgrades |
+
+### Release archive
+
+This is the recommended install path.
+
+Release archives are self-contained. They bundle:
+
+- `tsm`
+- `libghostty-vt`
+
+Users do not need to install Ghostty separately.
+
+Supported bundled release targets:
+
+- macOS `amd64`
+- macOS `arm64`
+- Linux `amd64`
+- Linux `arm64`
+
+Download the matching archive from GitHub Releases, extract it, and place `tsm` on your `PATH`.
+
+### Homebrew
+
+Homebrew installs the bundled `libghostty-vt` release build from the published tap formula.
+
+```bash
+brew tap adibhanna/homebrew-tsm
+brew install tsm
+```
+
+Remove it with:
+
+```bash
+brew uninstall tsm
+```
 
 ### Build from source
 
-If you are building from source, TSM needs `libghostty-vt` available via `pkg-config`.
-
-The repo can build it locally for you:
+If you want the Ghostty-backed build from source:
 
 ```bash
 git clone https://github.com/adibhanna/tsm.git
@@ -31,103 +100,444 @@ make build
 
 That clones Ghostty into `./ghostty`, builds `libghostty-vt` into `./.ghostty-prefix`, and links `tsm` against it.
 
-Optional fallback build:
+Install under a user prefix:
 
 ```bash
-make build-fallback
+make install
 ```
 
-The fallback mode works, but it does not fully restore full-screen terminal state.
+That installs:
 
-## Usage
+- `tsm` into `~/.local/bin`
+- `libghostty-vt` into `~/.local/lib/tsm`
 
-Run `tsm` to open the TUI.
+Remove it cleanly:
 
-Key CLI flows:
+```bash
+make uninstall
+```
 
-- `tsm attach`
-  - no sessions: create a new session named after the current directory and attach
-  - one session: attach directly
-  - multiple sessions: open the chooser
-- `tsm attach <name>`
-  - attach to a named session
-  - create it if it does not exist
-  - if run from inside another attached session, switch locally instead of nesting
-- `tsm detach`
-  - inside a session, detach the current session via `$TSM_SESSION`
-- `tsm detach <name>`
-  - detach all attached clients from that session without killing it
-- `tsm kill`
-  - inside a session, kill the current session via `$TSM_SESSION`
-- `tsm kill <name>...`
-  - kill one or more named sessions
+Override the install root if needed:
 
-Detach from an attached session with `Ctrl+\`.
+```bash
+make install PREFIX=/opt/homebrew
+make uninstall PREFIX=/opt/homebrew
+```
 
-## TUI
+System-wide install:
 
-The TUI supports:
+```bash
+sudo make install PREFIX=/usr/local
+sudo make uninstall PREFIX=/usr/local
+```
 
-- session list and sorting
-- colored live preview of the current terminal screen
-- create / rename / kill flows
-- copy attach command
-- attach and session switching
+## Quick Start
 
-Key bindings:
+Create or attach a session:
+
+```bash
+tsm attach
+```
+
+That command is intentionally smart:
+
+- no sessions: create one named after the current directory and attach
+- one session: attach directly
+- multiple sessions: open the picker
+
+Create a specific session and start a command inside it:
+
+```bash
+tsm new api bash -lc 'npm run dev'
+```
+
+Open Neovim in a session:
+
+```bash
+tsm attach editor
+nvim
+```
+
+Detach interactively:
+
+```text
+Ctrl+\
+```
+
+Reattach later:
+
+```bash
+tsm attach editor
+```
+
+List sessions:
+
+```bash
+tsm ls
+```
+
+## Session Model
+
+Each session is a long-lived daemon with:
+
+- a Unix socket
+- a PTY
+- a foreground process like `zsh`, `bash`, `fish`, `nvim`, or a custom command
+
+The session keeps running after you detach. You only lose it if you explicitly kill it or the process exits on its own.
+
+## CLI Workflow
+
+Use this if you prefer to stay in the shell.
+
+### Core commands
+
+```text
+tsm
+tsm tui [--simplified] [--keymap default|palette]
+tsm palette
+tsm config install [--force]
+tsm attach [name]
+tsm detach [name]
+tsm new <name> [cmd...]
+tsm ls
+tsm rename <old> <new>
+tsm kill [name...]
+tsm version
+```
+
+### Attach behavior
+
+`tsm attach` with no name:
+
+- no sessions: create one named after the current directory and attach
+- one session: attach directly
+- multiple sessions: open the chooser
+
+`tsm attach <name>`:
+
+- attach to the named session
+- create it if it does not exist
+- if run from inside another attached session, switch locally instead of nesting one attach inside another PTY
+
+### New session with command
+
+Anything after the session name becomes the command started inside the session instead of your default login shell.
+
+Examples:
+
+```bash
+tsm new work
+tsm new logs tail -f /var/log/system.log
+tsm new editor nvim
+tsm new api bash -lc 'npm run dev'
+```
+
+### Detach behavior
+
+`tsm detach` with no name uses `$TSM_SESSION`, so it detaches the current session when run inside an attached shell.
+
+`tsm detach <name>` detaches all attached clients from that named session without killing the daemon.
+
+### Kill behavior
+
+`tsm kill` with no name uses `$TSM_SESSION`, so it kills the current session when run inside an attached shell.
+
+`tsm kill <name>...` kills one or more named sessions.
+
+Examples:
+
+```bash
+tsm detach
+tsm detach work
+tsm kill
+tsm kill api worker repl
+```
+
+## TUI Workflow
+
+`tsm` and `tsm tui` open the full TUI.
+
+The full TUI is the best workflow when you want:
+
+- a session list
+- a live preview
+- session metadata
+- activity log feedback
+- create / rename / detach / kill flows without typing long commands
+
+### Full TUI default keys
 
 | Key | Action |
 | --- | --- |
 | `↑` `↓` | Navigate sessions |
 | `←` `→` | Scroll preview |
 | `space` | Toggle selection |
-| `ctrl+a` | Select / deselect all |
-| `enter` | Attach to selected session |
+| `ctrl+a` | Select or deselect all |
+| `enter` | Attach |
+| `d` | Detach selected session(s) |
 | `n` | New session |
 | `k` | Kill selected session(s) |
 | `R` | Rename session |
 | `c` | Copy attach command |
 | `s` | Cycle sort mode |
-| `/` | Filter sessions |
+| `ctrl+o` | Toggle full / simplified layout |
+| `/` | Filter |
 | `[` `]` | Scroll activity log |
 | `r` | Refresh |
 | `q` | Quit |
 
-## Build & Test
+## Simplified Palette
+
+Open it with:
+
+```bash
+tsm tui --simplified
+```
+
+Short forms:
+
+```bash
+tsm palette
+tsm p
+```
+
+The simplified TUI is the fast-switch mode:
+
+- list only
+- centered like a command palette
+- built for quick switching once you already know your session names
+
+By default it uses the same keymap as the full TUI.
+
+### Shared default keymap
+
+| Key | Action |
+| --- | --- |
+| `↑` `↓` | Navigate |
+| `space` | Toggle selection |
+| `ctrl+a` | Select or deselect all |
+| `enter` | Attach |
+| `d` | Detach |
+| `n` | New session |
+| `k` | Kill |
+| `R` | Rename |
+| `c` | Copy attach command |
+| `s` | Cycle sort mode |
+| `ctrl+o` | Toggle full / simplified layout |
+| `/` | Filter |
+| `r` | Refresh |
+| `q` | Quit |
+
+### Palette keymap
+
+If you want command-palette-style bindings:
+
+```bash
+tsm tui --simplified --keymap palette
+```
+
+The `palette` keymap applies identically to both layouts.
+
+| Key | Action |
+| --- | --- |
+| `type` | Filter sessions immediately |
+| `↑` `↓` | Navigate |
+| `tab` | Toggle selection |
+| `ctrl+a` | Select all |
+| `enter` | Attach |
+| `ctrl+d` | Detach |
+| `ctrl+t` | New session |
+| `ctrl+x` | Kill |
+| `ctrl+r` | Rename |
+| `ctrl+y` | Copy attach command |
+| `ctrl+s` | Cycle sort mode |
+| `ctrl+o` | Toggle layout |
+| `ctrl+l` | Refresh |
+| `ctrl+c` | Quit |
+
+While the palette keymap is active:
+
+- typing filters immediately
+- `esc` clears the filter
+- if the filter is already empty, `esc` exits
+
+## Quick Session Shortcuts
+
+Inside fresh TSM-managed interactive shells, `Ctrl+P` opens the simplified palette by default.
+
+This is provided for:
+
+- `zsh`
+- `bash`
+- `fish`
+
+That does override the usual shell-history meaning of `Ctrl+P` at the prompt.
+
+If you want a global shortcut from any shell, add this to your shell config instead.
+
+For `zsh`:
+
+```zsh
+tsm_palette() {
+  zle -I
+  tsm p
+  zle reset-prompt
+}
+zle -N tsm_palette
+bindkey '^g' tsm_palette
+```
+
+For `bash`:
+
+```bash
+tsm_palette() {
+  tsm p
+}
+bind -x '"\C-g":tsm_palette'
+```
+
+`Ctrl+G` is the safer global binding because it does not collide with the common shell-history meaning of `Ctrl+P`.
+
+## Config File
+
+Install the default config:
+
+```bash
+tsm config install
+```
+
+Overwrite an existing config:
+
+```bash
+tsm config install --force
+```
+
+Default config path:
+
+```text
+~/.config/tsm/config.toml
+```
+
+Override the config path:
+
+```bash
+export TSM_CONFIG_FILE=/path/to/config.toml
+```
+
+Config precedence:
+
+1. built-in defaults
+2. config file
+3. env vars
+4. CLI flags
+
+Example:
+
+```toml
+[tui]
+mode = "simplified"
+keymap = "default"
+show_help = false
+
+[tui.keymaps.default]
+move_up = ["k"]
+move_down = ["j"]
+attach = ["enter"]
+detach = ["x"]
+toggle_layout = ["ctrl+o"]
+```
+
+Supported action names:
+
+- `move_up`
+- `move_down`
+- `move_left`
+- `move_right`
+- `toggle_select_all`
+- `toggle_select`
+- `attach`
+- `detach`
+- `new_session`
+- `kill`
+- `rename`
+- `copy_command`
+- `sort`
+- `toggle_layout`
+- `filter`
+- `refresh`
+- `quit`
+- `force_quit`
+- `log_up`
+- `log_down`
+
+Set `show_help = false` to hide the shortcut guide in the TUI.
+
+## Shell Integration
+
+For default interactive shells, `tsm` injects a lightweight shell integration shim.
+
+Supported shells:
+
+- `zsh`
+- `bash`
+- `fish`
+
+What it provides:
+
+- prompt prefix like `[tsm:work]`
+- terminal title updates
+- `$TSM_SESSION`
+- `$TSM_SHELL_INTEGRATION`
+- `Ctrl+P` opens the simplified palette
+
+This integration is applied to fresh sessions started with the current binary. Existing already-running sessions keep the shell environment they started with.
+
+## Screen Restore
+
+TSM always uses `libghostty-vt` to:
+
+- consume PTY output continuously
+- serialize the current terminal state on attach
+- render the live colored preview in the TUI
+
+This is what restores Neovim and other full-screen apps correctly and powers the colored TUI preview.
+
+## Build, Test, Release
 
 ```bash
 make setup-ghostty-vt
 make build
+make install
+make uninstall
 make test
 make release
 ```
 
 `make release` creates a self-contained archive for the current platform.
 
-## How It Works
+## Release and Packaging Notes
 
-Each session is a daemon process that owns a PTY and listens on a Unix domain socket. The daemon feeds PTY output into a terminal backend:
+For maintainers:
 
-- default: `libghostty-vt`
-- fallback: lightweight mode tracker behind `-tags noghosttyvt`
+- tagged releases publish bundled macOS and Linux archives
+- Homebrew publishing updates the tap from the tagged release archives
 
-On attach, the daemon serializes the current terminal state and sends it to the client before resize, which allows full-screen apps to restore correctly. The TUI preview uses the same tracked terminal state, not a raw byte replay.
+Automated Homebrew publishing expects:
 
-For `zsh`, TSM also injects a small shell integration shim:
-
-- prompt prefix: `[tsm:<name>]`
-- terminal title: `tsm:<name> ...`
-- env var: `$TSM_SESSION`
-
-Sessions live under `$TSM_DIR` or the resolved runtime temp directory.
+- repository variable `HOMEBREW_TAP_REPO`
+- repository secret `HOMEBREW_TAP_GITHUB_TOKEN`
 
 ## Environment Variables
 
-| Variable | Description |
+| Variable | Purpose |
 | --- | --- |
 | `TSM_DIR` | Override the socket directory |
-| `TSM_SESSION` | Set automatically inside sessions |
-| `TSM_SHELL_INTEGRATION` | Set to `zsh` when the zsh prompt/title shim is active |
+| `TSM_SESSION` | Current session name inside attached shells |
+| `TSM_SHELL_INTEGRATION` | Shell integration mode: `zsh`, `bash`, or `fish` |
+| `TSM_TUI_MODE` | Default TUI mode: `full` or `simplified` |
+| `TSM_TUI_KEYMAP` | Default TUI keymap: `default` or `palette` |
+| `TSM_CONFIG_FILE` | Override config file path |
 | `SHELL` | Default shell used for new sessions |
 
 ## License

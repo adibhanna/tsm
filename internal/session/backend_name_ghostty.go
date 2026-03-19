@@ -1,4 +1,4 @@
-//go:build cgo && !noghosttyvt
+//go:build cgo
 
 package session
 

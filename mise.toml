@@ -3,11 +3,11 @@ go = "1.25"
 
 [tasks.build]
 description = "Build tsm binary"
-run = "go build -o tsm ."
+run = "make build"
 
 [tasks.install]
-description = "Install tsm to $GOPATH/bin"
-run = "go install ."
+description = "Install tsm with bundled libghostty-vt"
+run = "make install"
 
 [tasks.fmt]
 description = "Format code"
@@ -19,7 +19,7 @@ run = "go vet ./..."
 
 [tasks.test]
 description = "Run tests"
-run = "go test ./..."
+run = "make test"
 
 [tasks.clean]
 description = "Remove built binary"

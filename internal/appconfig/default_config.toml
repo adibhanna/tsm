@@ -1,0 +1,56 @@
+# Copy this file to ~/.config/tsm/config.toml to customize TSM.
+#
+# Precedence:
+# 1. built-in defaults
+# 2. ~/.config/tsm/config.toml
+# 3. TSM_TUI_MODE / TSM_TUI_KEYMAP / TSM_CONFIG_FILE
+# 4. CLI flags like `tsm tui --simplified --keymap palette`
+
+[tui]
+# mode = "full"
+# keymap = "default"
+# show_help = true
+
+[tui.keymaps.default]
+move_up = ["up"]
+move_down = ["down"]
+move_left = ["left"]
+move_right = ["right"]
+toggle_select_all = ["ctrl+a"]
+toggle_select = ["space"]
+attach = ["enter"]
+detach = ["d"]
+new_session = ["n"]
+kill = ["k"]
+rename = ["R"]
+copy_command = ["c"]
+sort = ["s"]
+toggle_layout = ["ctrl+o"]
+filter = ["/"]
+refresh = ["r"]
+quit = ["q"]
+force_quit = ["ctrl+c"]
+log_up = ["["]
+log_down = ["]"]
+
+[tui.keymaps.palette]
+move_up = ["up", "ctrl+p"]
+move_down = ["down", "ctrl+n"]
+move_left = ["left"]
+move_right = ["right"]
+toggle_select_all = ["ctrl+a"]
+toggle_select = ["tab"]
+attach = ["enter"]
+detach = ["ctrl+d"]
+new_session = ["ctrl+t"]
+kill = ["ctrl+x"]
+rename = ["ctrl+r"]
+copy_command = ["ctrl+y"]
+sort = ["ctrl+s"]
+toggle_layout = ["ctrl+o"]
+filter = ["ctrl+f"]
+refresh = ["ctrl+l"]
+quit = ["q"]
+force_quit = ["ctrl+c"]
+log_up = ["["]
+log_down = ["]"]
