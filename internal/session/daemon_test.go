@@ -1,8 +1,8 @@
 package session
 
 import (
-	"os/exec"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
