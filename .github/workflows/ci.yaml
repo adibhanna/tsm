@@ -15,7 +15,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: 0.15.2
+      - run: make setup-ghostty-vt
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
-      - run: go test -race ./...
-      - run: go build -o tsm .
+      - run: make test
+      - run: make build

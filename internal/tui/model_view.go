@@ -11,13 +11,7 @@ import (
 )
 
 func previewMaxWidth(raw string) int {
-	maxW := 0
-	for _, line := range strings.Split(raw, "\n") {
-		if w := runewidth.StringWidth(line); w > maxW {
-			maxW = w
-		}
-	}
-	return maxW
+	return engine.PreviewWidth(raw)
 }
 
 // Layout
@@ -272,6 +266,11 @@ func (m Model) renderHelp() string {
 		return helpStyle.Render(" New session: ") + helpKeyStyle.Render(m.newSessionName) + helpStyle.Render(cursor+"  Enter create | Esc cancel")
 	}
 
+	if m.state == stateRenameSession {
+		cursor := "█"
+		return helpStyle.Render(" Rename: ") + helpKeyStyle.Render(m.renameNewName) + helpStyle.Render(cursor+"  Enter rename | Esc cancel")
+	}
+
 	if m.state == stateFilter {
 		cursor := "█"
 		return helpStyle.Render(" /") + helpKeyStyle.Render(m.filterText) + helpStyle.Render(cursor+"  Enter accept | Esc clear")
@@ -293,6 +292,7 @@ func (m Model) renderHelp() string {
 		helpKeyStyle.Render("enter") + helpStyle.Render(" attach"),
 		helpKeyStyle.Render("n") + helpStyle.Render(" new"),
 		helpKeyStyle.Render("k") + helpStyle.Render(" kill"),
+		helpKeyStyle.Render("R") + helpStyle.Render(" rename"),
 		helpKeyStyle.Render("c") + helpStyle.Render(" copy cmd"),
 		helpKeyStyle.Render("s") + helpStyle.Render(" sort"),
 	}

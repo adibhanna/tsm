@@ -2,11 +2,25 @@ name: Release
 on:
   push:
     tags: ["v*"]
+
 permissions:
   contents: write
+
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-amd64
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+          - runner: macos-13
+            target: darwin-amd64
+          - runner: macos-14
+            target: darwin-arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -14,10 +28,30 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: mlugg/setup-zig@v1
         with:
-          version: "~> v2"
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          version: 0.15.2
+      - run: make setup-ghostty-vt
+      - run: make release VERSION=${GITHUB_REF_NAME} COMMIT=${GITHUB_SHA}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/*.tar.gz
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: release-*
+          merge-multiple: true
+      - run: |
+          cd dist
+          sha256sum *.tar.gz > checksums.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/checksums.txt

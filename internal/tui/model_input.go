@@ -114,6 +114,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			case "n":
 				m.state = stateNewSession
 				m.newSessionName = ""
+			case "R":
+				if m.cursor < len(visible) {
+					m.state = stateRenameSession
+					m.renameOldName = visible[m.cursor].Name
+					m.renameNewName = visible[m.cursor].Name
+				}
 			case "r":
 				return m, fetchSessionsCmd
 			case "/":
@@ -269,6 +275,50 @@ func (m Model) handleNewSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			ch := msg.Text
 			if ch != " " && ch != "\t" {
 				m.newSessionName += ch
+			}
+		}
+	}
+
+	return m, nil
+}
+
+func (m Model) handleRenameSessionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if isQuit(msg) {
+		return m, tea.Quit
+	}
+
+	switch msg.Code {
+	case tea.KeyEscape:
+		m.state = stateNormal
+		m.renameOldName = ""
+		m.renameNewName = ""
+		return m, nil
+
+	case tea.KeyEnter:
+		newName := strings.TrimSpace(m.renameNewName)
+		oldName := m.renameOldName
+		m.state = stateNormal
+		m.renameOldName = ""
+		m.renameNewName = ""
+		if newName == "" || newName == oldName {
+			return m, nil
+		}
+		m.addLog(helpStyle.Render(fmt.Sprintf("  ⋯ Renaming: %s → %s", oldName, newName)))
+		return m, renameSessionCmd(oldName, newName)
+
+	case tea.KeyBackspace:
+		if len(m.renameNewName) > 0 {
+			m.renameNewName = m.renameNewName[:len(m.renameNewName)-1]
+		} else {
+			m.state = stateNormal
+			return m, nil
+		}
+
+	default:
+		if msg.Text != "" {
+			ch := msg.Text
+			if ch != " " && ch != "\t" {
+				m.renameNewName += ch
 			}
 		}
 	}

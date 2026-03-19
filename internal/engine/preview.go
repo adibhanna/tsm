@@ -8,11 +8,10 @@ import (
 	"time"
 
 	"github.com/adibhanna/tsm/internal/session"
-	"github.com/mattn/go-runewidth"
+	"github.com/charmbracelet/x/ansi"
 )
 
-// FetchPreview returns the last `lines` lines of a session's scrollback,
-// with all ANSI escape sequences stripped.
+// FetchPreview returns the last `lines` lines of the daemon-rendered preview.
 func FetchPreview(name string, lines int) string {
 	if lines < 1 {
 		lines = 1
@@ -51,7 +50,7 @@ func tailLinesFromReader(r io.Reader, lines int) (string, error) {
 
 	tail := make([]string, 0, lines)
 	for scanner.Scan() {
-		tail = append(tail, stripANSI(scanner.Text()))
+		tail = append(tail, sanitizePreviewLine(scanner.Text()))
 		if len(tail) > lines {
 			tail = tail[1:]
 		}
@@ -66,28 +65,35 @@ func tailLinesFromReader(r io.Reader, lines int) (string, error) {
 func ScrollPreview(raw string, offsetX, maxWidth int) string {
 	lines := strings.Split(raw, "\n")
 	for i, line := range lines {
-		skipped := 0
-		runeIdx := 0
-		runes := []rune(line)
-		for runeIdx < len(runes) && skipped < offsetX {
-			w := runewidth.RuneWidth(runes[runeIdx])
-			skipped += w
-			runeIdx++
+		rest := ansi.TruncateLeft(line, offsetX, "")
+		visible := ansi.Truncate(rest, maxWidth, "")
+		if pad := maxWidth - ansi.StringWidth(visible); pad > 0 {
+			visible += strings.Repeat(" ", pad)
 		}
-		rest := string(runes[runeIdx:])
-		lines[i] = runewidth.FillRight(runewidth.Truncate(rest, maxWidth, ""), maxWidth)
+		lines[i] = visible
 	}
 	return strings.Join(lines, "\n")
 }
 
-// stripANSI removes all ANSI escape sequences and non-printable control
-// characters (except newline and tab) from s.
-func stripANSI(s string) string {
+func PreviewWidth(raw string) int {
+	maxW := 0
+	for _, line := range strings.Split(raw, "\n") {
+		if w := ansi.StringWidth(line); w > maxW {
+			maxW = w
+		}
+	}
+	return maxW
+}
+
+// sanitizePreviewLine removes non-printable control characters while keeping
+// ANSI styling sequences intact so the TUI can render colored previews.
+func sanitizePreviewLine(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	i := 0
 	for i < len(s) {
 		if s[i] == '\x1b' {
+			start := i
 			i++
 			if i >= len(s) {
 				break
@@ -101,6 +107,7 @@ func stripANSI(s string) string {
 				if i < len(s) {
 					i++
 				}
+				b.WriteString(s[start:i])
 			case ']':
 				i++
 				for i < len(s) {
@@ -114,11 +121,13 @@ func stripANSI(s string) string {
 					}
 					i++
 				}
+				b.WriteString(s[start:i])
 			case '(', ')':
 				i++
 				if i < len(s) {
 					i++
 				}
+				b.WriteString(s[start:i])
 			default:
 				i++
 			}

@@ -3,11 +3,13 @@ version: 2
 before:
   hooks:
     - go mod tidy
+    - make setup-ghostty-vt
 
 builds:
-  - binary: tsm
+  - id: tsm
+    binary: tsm
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
     goos:
       - darwin
       - linux
@@ -18,18 +20,16 @@ builds:
       - -s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}} -X main.date={{.Date}}
 
 archives:
-  - format: tar.gz
+  - ids:
+      - tsm
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-
-brews:
-  - name: tsm
-    directory: Formula
-    repository:
-      owner: adibhanna
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: "https://github.com/adibhanna/tsm"
-    description: "TUI terminal session manager"
+    files:
+      - README.md
+      - LICENSE
+      - src: .ghostty-prefix/lib/libghostty-vt*.dylib
+        dst: .
+      - src: .ghostty-prefix/lib/libghostty-vt*.so*
+        dst: .
 
 changelog:
   sort: asc

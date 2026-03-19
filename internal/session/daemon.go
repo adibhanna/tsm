@@ -1,18 +1,32 @@
 package session
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/creack/pty/v2"
 )
+
+// getForegroundPgrp returns the foreground process group of the PTY.
+func getForegroundPgrp(ptmx *os.File) (int, error) {
+	var pgrp int32
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, ptmx.Fd(),
+		syscall.TIOCGPGRP, uintptr(unsafe.Pointer(&pgrp)))
+	if errno != 0 {
+		return 0, errno
+	}
+	return int(pgrp), nil
+}
 
 const scrollbackSize = 10 * 1024 * 1024 // 10 MB, default
 
@@ -24,13 +38,19 @@ type Daemon struct {
 	ptmx       *os.File
 	listener   net.Listener
 	scrollback *Scrollback
+	terminal   TerminalBackend
 	createdAt  time.Time
 
 	mu      sync.RWMutex
-	clients map[net.Conn]bool
+	clients map[net.Conn]*clientState
 
 	done     chan struct{}
 	doneOnce sync.Once
+}
+
+type clientState struct {
+	attached bool
+	writeMu  sync.Mutex
 }
 
 // StartDaemon creates a new session with a PTY and listens on a Unix socket.
@@ -58,10 +78,15 @@ func StartDaemon(name string, shellCmd []string) error {
 	defer os.Remove(sockPath)
 
 	// Determine shell command.
-	shell, args := resolveShell(shellCmd)
+	shell, argv := resolveShell(shellCmd)
 
-	cmd := exec.Command(shell, args...)
-	cmd.Env = buildDaemonEnv(name)
+	cmd := exec.Command(shell)
+	cmd.Args = argv // Override so argv[0] can be "-zsh" for login shells.
+	env, err := buildDaemonEnv(cfg, name, shell, shellCmd)
+	if err != nil {
+		return fmt.Errorf("build daemon env: %w", err)
+	}
+	cmd.Env = env
 	cmd.Dir, _ = os.Getwd()
 
 	// Start the command with a PTY.
@@ -71,6 +96,11 @@ func StartDaemon(name string, shellCmd []string) error {
 	}
 	defer ptmx.Close()
 
+	rows, cols, err := pty.Getsize(ptmx)
+	if err != nil || rows <= 0 || cols <= 0 {
+		rows, cols = 24, 80
+	}
+
 	d := &Daemon{
 		name:       name,
 		cfg:        cfg,
@@ -78,10 +108,12 @@ func StartDaemon(name string, shellCmd []string) error {
 		ptmx:       ptmx,
 		listener:   ln,
 		scrollback: NewScrollback(scrollbackSize),
+		terminal:   NewTerminalBackend(uint16(rows), uint16(cols)),
 		createdAt:  time.Now(),
-		clients:    make(map[net.Conn]bool),
+		clients:    make(map[net.Conn]*clientState),
 		done:       make(chan struct{}),
 	}
+	defer d.terminal.Close()
 
 	// Handle signals.
 	sigCh := make(chan os.Signal, 1)
@@ -161,6 +193,7 @@ func (d *Daemon) readPTY() {
 		n, err := d.ptmx.Read(buf)
 		if n > 0 {
 			data := buf[:n]
+			d.terminal.Consume(data)
 			d.scrollback.Write(data)
 			d.broadcast(TagOutput, data)
 		}
@@ -182,7 +215,7 @@ func (d *Daemon) acceptLoop() {
 			}
 		}
 		d.mu.Lock()
-		d.clients[conn] = true
+		d.clients[conn] = &clientState{}
 		d.mu.Unlock()
 		go d.handleClient(conn)
 	}
@@ -206,7 +239,8 @@ func (d *Daemon) handleClient(conn net.Conn) {
 		conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 		tag, payload, err := ReadMessage(conn, 1*time.Second)
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
 				continue
 			}
 			return
@@ -224,25 +258,39 @@ func (d *Daemon) handleClient(conn net.Conn) {
 					Rows: rows,
 					Cols: cols,
 				})
+				d.terminal.Resize(rows, cols)
 			}
 
 		case TagInit:
-			// Client just connected — send current terminal state.
+			// Client just connected — resize PTY, signal the foreground
+			// process group, and send Ctrl+L to force a redraw.
+			d.markClientAttached(conn)
+			if seq := d.terminal.Snapshot(); len(seq) > 0 {
+				d.sendMessage(conn, TagOutput, seq, ioTimeout)
+			}
 			if len(payload) >= 4 {
 				rows := uint16(payload[0]) | uint16(payload[1])<<8
 				cols := uint16(payload[2]) | uint16(payload[3])<<8
-				pty.Setsize(d.ptmx, &pty.Winsize{
-					Rows: rows,
-					Cols: cols,
-				})
+				pty.Setsize(d.ptmx, &pty.Winsize{Rows: rows, Cols: cols})
+				d.terminal.Resize(rows, cols)
 			}
+			if pgrp, err := getForegroundPgrp(d.ptmx); err == nil && pgrp > 0 {
+				syscall.Kill(-pgrp, syscall.SIGWINCH)
+			}
+			// Poke the PTY with Ctrl+L to wake up the app's event loop
+			// and force an immediate screen redraw (works in vim + shells).
+			time.Sleep(10 * time.Millisecond)
+			d.ptmx.Write([]byte{0x0c})
 
 		case TagInfo:
 			d.sendInfo(conn)
 
 		case TagHistory:
-			data := d.scrollback.Bytes()
-			SendMessage(conn, TagHistory, data)
+			data := d.terminal.Preview()
+			if len(data) == 0 {
+				data = []byte(d.scrollback.TailLines(256))
+			}
+			d.sendMessage(conn, TagHistory, data, ioTimeout)
 
 		case TagKill:
 			d.doneOnce.Do(func() { close(d.done) })
@@ -260,19 +308,15 @@ func (d *Daemon) handleClient(conn net.Conn) {
 
 		case TagRun:
 			// For now, just acknowledge.
-			SendMessage(conn, TagAck, nil)
+			d.sendMessage(conn, TagAck, nil, ioTimeout)
 		}
 	}
 }
 
 func (d *Daemon) broadcast(tag Tag, data []byte) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
 	msg := MarshalMessage(tag, data)
-	for conn := range d.clients {
-		conn.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
-		conn.Write(msg)
+	for _, client := range d.snapshotClients() {
+		client.state.writeMessage(client.conn, msg, 100*time.Millisecond)
 	}
 }
 
@@ -290,12 +334,17 @@ func (d *Daemon) sendInfo(conn net.Conn) {
 	putUint64LE(data[536:544], info.TaskEndedAt)
 	data[544] = info.TaskExitCode
 
-	SendMessage(conn, TagInfo, data)
+	d.sendMessage(conn, TagInfo, data, ioTimeout)
 }
 
 func (d *Daemon) buildInfo() InfoPayload {
 	d.mu.RLock()
-	clientCount := len(d.clients)
+	clientCount := 0
+	for _, state := range d.clients {
+		if state.attached {
+			clientCount++
+		}
+	}
 	d.mu.RUnlock()
 
 	var info InfoPayload
@@ -322,33 +371,181 @@ func (d *Daemon) closeAllClients() {
 	for conn := range d.clients {
 		conn.Close()
 	}
-	d.clients = make(map[net.Conn]bool)
+	d.clients = make(map[net.Conn]*clientState)
+}
+
+type clientSnapshot struct {
+	conn  net.Conn
+	state *clientState
+}
+
+func (d *Daemon) snapshotClients() []clientSnapshot {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	clients := make([]clientSnapshot, 0, len(d.clients))
+	for conn, state := range d.clients {
+		clients = append(clients, clientSnapshot{conn: conn, state: state})
+	}
+	return clients
+}
+
+func (d *Daemon) getClientState(conn net.Conn) *clientState {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.clients[conn]
+}
+
+func (d *Daemon) markClientAttached(conn net.Conn) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if state := d.clients[conn]; state != nil {
+		state.attached = true
+	}
+}
+
+func (d *Daemon) sendMessage(conn net.Conn, tag Tag, payload []byte, timeout time.Duration) error {
+	msg := MarshalMessage(tag, payload)
+	if state := d.getClientState(conn); state != nil {
+		return state.writeMessage(conn, msg, timeout)
+	}
+	conn.SetWriteDeadline(time.Now().Add(timeout))
+	_, err := conn.Write(msg)
+	return err
+}
+
+func (c *clientState) writeMessage(conn net.Conn, msg []byte, timeout time.Duration) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+
+	conn.SetWriteDeadline(time.Now().Add(timeout))
+	_, err := conn.Write(msg)
+	return err
 }
 
 // resolveShell determines the shell command to run.
+// Returns (executable path, full argv). For a default login shell
+// argv[0] is "-zsh"/"-bash"/etc., which the shell interprets as
+// "I am a login shell". For explicit commands argv is passed through.
 func resolveShell(shellCmd []string) (string, []string) {
 	if len(shellCmd) > 0 {
-		return shellCmd[0], shellCmd[1:]
+		return shellCmd[0], shellCmd
 	}
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
 	}
 	// Login shell: argv[0] starts with "-"
-	name := "-" + shell[strings.LastIndex(shell, "/")+1:]
-	return shell, []string{name}
+	argv0 := "-" + shell[strings.LastIndex(shell, "/")+1:]
+	return shell, []string{argv0}
 }
 
-func buildDaemonEnv(name string) []string {
+func buildDaemonEnv(cfg Config, name, shell string, shellCmd []string) ([]string, error) {
 	var env []string
 	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "TSM_SESSION=") {
+		switch {
+		case strings.HasPrefix(e, "TSM_SESSION="):
+		case strings.HasPrefix(e, "ZDOTDIR="):
+		case strings.HasPrefix(e, "TSM_ORIG_ZDOTDIR="):
+		case strings.HasPrefix(e, "TSM_SHELL_INTEGRATION="):
+		default:
 			env = append(env, e)
 		}
 	}
 	env = append(env, "TSM_SESSION="+name)
-	return env
+
+	if shouldUseZshIntegration(shell, shellCmd) {
+		dir, err := ensureZshIntegration(cfg, name)
+		if err != nil {
+			return nil, err
+		}
+		origZdotdir := os.Getenv("ZDOTDIR")
+		if origZdotdir == "" {
+			origZdotdir, _ = os.UserHomeDir()
+		}
+		if origZdotdir != "" {
+			env = append(env, "TSM_ORIG_ZDOTDIR="+origZdotdir)
+		}
+		env = append(env, "ZDOTDIR="+dir)
+		env = append(env, "TSM_SHELL_INTEGRATION=zsh")
+	}
+
+	return env, nil
 }
+
+func shouldUseZshIntegration(shell string, shellCmd []string) bool {
+	if len(shellCmd) > 0 {
+		return false
+	}
+	return filepath.Base(shell) == "zsh"
+}
+
+func ensureZshIntegration(cfg Config, name string) (string, error) {
+	dir := filepath.Join(cfg.SocketDir, ".zsh", name)
+	if err := os.MkdirAll(dir, 0750); err != nil {
+		return "", fmt.Errorf("mkdir zsh integration dir: %w", err)
+	}
+
+	files := map[string]string{
+		".zshenv":   zshEnvShim,
+		".zprofile": zshProfileShim,
+		".zshrc":    zshRcShim,
+		".zlogin":   zshLoginShim,
+		".zlogout":  zshLogoutShim,
+	}
+	for name, contents := range files {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(contents), 0640); err != nil {
+			return "", fmt.Errorf("write %s: %w", path, err)
+		}
+	}
+
+	return dir, nil
+}
+
+const zshEnvShim = `if [[ -n "${TSM_ORIG_ZDOTDIR:-}" && -f "${TSM_ORIG_ZDOTDIR}/.zshenv" ]]; then
+  source "${TSM_ORIG_ZDOTDIR}/.zshenv"
+fi
+`
+
+const zshProfileShim = `if [[ -n "${TSM_ORIG_ZDOTDIR:-}" && -f "${TSM_ORIG_ZDOTDIR}/.zprofile" ]]; then
+  source "${TSM_ORIG_ZDOTDIR}/.zprofile"
+fi
+`
+
+const zshRcShim = `if [[ -n "${TSM_ORIG_ZDOTDIR:-}" && -f "${TSM_ORIG_ZDOTDIR}/.zshrc" ]]; then
+  source "${TSM_ORIG_ZDOTDIR}/.zshrc"
+fi
+
+if [[ -n "${TSM_SESSION:-}" ]]; then
+  typeset -g _tsm_prompt_marker="[tsm:${TSM_SESSION}]"
+  case "${PROMPT:-}" in
+    *"${_tsm_prompt_marker}"*) ;;
+    *)
+      PROMPT="%F{6}${_tsm_prompt_marker}%f ${PROMPT:-%# }"
+      ;;
+  esac
+
+  autoload -Uz add-zsh-hook
+  _tsm_precmd_title() {
+    print -Pn -- "\e]2;tsm:${TSM_SESSION} %~\a"
+  }
+  if (( ${precmd_functions[(Ie)_tsm_precmd_title]} == 0 )); then
+    add-zsh-hook precmd _tsm_precmd_title
+  fi
+  _tsm_precmd_title
+fi
+`
+
+const zshLoginShim = `if [[ -n "${TSM_ORIG_ZDOTDIR:-}" && -f "${TSM_ORIG_ZDOTDIR}/.zlogin" ]]; then
+  source "${TSM_ORIG_ZDOTDIR}/.zlogin"
+fi
+`
+
+const zshLogoutShim = `if [[ -n "${TSM_ORIG_ZDOTDIR:-}" && -f "${TSM_ORIG_ZDOTDIR}/.zlogout" ]]; then
+  source "${TSM_ORIG_ZDOTDIR}/.zlogout"
+fi
+`
 
 // putUint16LE, putUint32LE, putUint64LE write little-endian integers.
 func putUint16LE(b []byte, v uint16) { b[0] = byte(v); b[1] = byte(v >> 8) }

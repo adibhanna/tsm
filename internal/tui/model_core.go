@@ -25,6 +25,7 @@ const (
 	stateConfirmKill
 	stateFilter
 	stateNewSession
+	stateRenameSession
 )
 
 type sortMode int
@@ -84,6 +85,12 @@ type createSessionMsg struct {
 	err  error
 }
 
+type renameSessionMsg struct {
+	oldName string
+	newName string
+	err     error
+}
+
 // Commands
 
 func fetchSessionsCmd() tea.Msg {
@@ -107,6 +114,13 @@ func createSessionCmd(name string) tea.Cmd {
 	return func() tea.Msg {
 		err := engine.CreateSession(name)
 		return createSessionMsg{name: name, err: err}
+	}
+}
+
+func renameSessionCmd(oldName, newName string) tea.Cmd {
+	return func() tea.Msg {
+		err := engine.RenameSession(oldName, newName)
+		return renameSessionMsg{oldName: oldName, newName: newName, err: err}
 	}
 }
 
@@ -141,6 +155,8 @@ type Model struct {
 	state          state
 	status         string
 	newSessionName string
+	renameOldName  string
+	renameNewName  string
 
 	// Activity log
 	logLines  []string
@@ -398,6 +414,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return fetchSessionsCmd()
 		})
 
+	case renameSessionMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("Rename failed: %v", msg.err)
+			m.addLog(confirmStyle.Render(fmt.Sprintf("  ✗ Rename %s: %v", msg.oldName, msg.err)))
+		} else {
+			m.status = fmt.Sprintf("Renamed %s → %s", msg.oldName, msg.newName)
+			m.addLog(statusStyle.Render(fmt.Sprintf("  ✓ Renamed: %s → %s", msg.oldName, msg.newName)))
+		}
+		return m, tea.Batch(fetchSessionsCmd, clearStatusAfter(3*time.Second))
+
 	case createSessionMsg:
 		if msg.err != nil {
 			m.status = fmt.Sprintf("Create failed: %v", msg.err)
@@ -417,6 +443,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.state == stateNewSession {
 			return m.handleNewSessionKey(msg)
+		}
+		if m.state == stateRenameSession {
+			return m.handleRenameSessionKey(msg)
 		}
 		return m.handleKey(msg)
 	}

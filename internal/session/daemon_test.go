@@ -1,6 +1,9 @@
 package session
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -68,5 +71,46 @@ func TestDaemonStartAndProbe(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Error("daemon didn't exit after kill")
+	}
+}
+
+func TestBuildDaemonEnvAddsZshIntegration(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	if err := os.MkdirAll(home, 0750); err != nil {
+		t.Fatalf("mkdir home: %v", err)
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv("TSM_DIR", dir)
+
+	cfg := DefaultConfig()
+	env, err := buildDaemonEnv(cfg, "demo", "/bin/zsh", nil)
+	if err != nil {
+		t.Fatalf("buildDaemonEnv: %v", err)
+	}
+
+	values := map[string]string{}
+	for _, kv := range env {
+		key, value, _ := strings.Cut(kv, "=")
+		values[key] = value
+	}
+
+	if got := values["TSM_SESSION"]; got != "demo" {
+		t.Fatalf("TSM_SESSION = %q, want demo", got)
+	}
+	if got := values["TSM_SHELL_INTEGRATION"]; got != "zsh" {
+		t.Fatalf("TSM_SHELL_INTEGRATION = %q, want zsh", got)
+	}
+	if got := values["TSM_ORIG_ZDOTDIR"]; got != home {
+		t.Fatalf("TSM_ORIG_ZDOTDIR = %q, want %q", got, home)
+	}
+
+	zdotdir := values["ZDOTDIR"]
+	if zdotdir == "" {
+		t.Fatal("expected ZDOTDIR to be set")
+	}
+	if _, err := os.Stat(filepath.Join(zdotdir, ".zshrc")); err != nil {
+		t.Fatalf("expected generated .zshrc: %v", err)
 	}
 }

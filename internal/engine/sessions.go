@@ -22,6 +22,11 @@ func KillSession(name string) error {
 	return session.KillSession(session.DefaultConfig(), name)
 }
 
+// RenameSession renames a session.
+func RenameSession(oldName, newName string) error {
+	return session.RenameSession(session.DefaultConfig(), oldName, newName)
+}
+
 // CopyToClipboard copies text to the system clipboard.
 func CopyToClipboard(text string) error {
 	return deps.clipboardWrite(text)

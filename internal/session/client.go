@@ -1,7 +1,9 @@
 package session
 
 import (
+	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -12,6 +14,30 @@ import (
 
 	"golang.org/x/term"
 )
+
+// Kitty keyboard protocol encodes Ctrl+\ as CSI 92;5u (92 = '\', 5 = ctrl modifier).
+// Some terminals also send extended format like CSI 92;5:1u.
+var kittyCtrlBackslash = []byte("\x1b[92;5u")
+var kittyCtrlBackslashExt = []byte("\x1b[92;5:")
+
+// isDetachKey checks if the input contains the detach sequence:
+// either traditional Ctrl+\ (0x1C) or Kitty keyboard protocol encoding.
+func isDetachKey(data []byte) bool {
+	for _, b := range data {
+		if b == 0x1C {
+			return true
+		}
+	}
+	return bytes.Contains(data, kittyCtrlBackslash) ||
+		bytes.Contains(data, kittyCtrlBackslashExt)
+}
+
+// Terminal reset sequences sent on detach (mirrors zmx).
+// Disables mouse tracking, bracketed paste, focus events, alt screen; shows cursor.
+const termResetSeq = "\033[?1000l\033[?1002l\033[?1003l\033[?1006l" +
+	"\033[?2004l\033[?1004l\033[?1049l" +
+	"\033[?25h" +
+	"\033[0m"
 
 // Attach connects to a session and relays I/O between the local terminal and the PTY.
 func Attach(cfg Config, name string) error {
@@ -27,9 +53,20 @@ func Attach(cfg Config, name string) error {
 	if err != nil {
 		return fmt.Errorf("raw mode: %w", err)
 	}
-	defer term.Restore(int(os.Stdin.Fd()), oldState)
+	defer func() {
+		term.Restore(int(os.Stdin.Fd()), oldState)
+		// Reset terminal modes that the session may have enabled.
+		os.Stdout.WriteString(termResetSeq)
+	}()
 
-	// Send Init message with terminal size.
+	// Ignore SIGQUIT so Ctrl+\ doesn't kill us — we use it to detach.
+	signal.Ignore(syscall.SIGQUIT)
+	defer signal.Reset(syscall.SIGQUIT)
+
+	// Clear screen so the SIGWINCH redraw lands on a clean slate.
+	os.Stdout.WriteString("\033[2J\033[H")
+
+	// Send Init — daemon bounces PTY size → SIGWINCH → app redraws.
 	if err := sendInit(conn); err != nil {
 		return fmt.Errorf("send init: %w", err)
 	}
@@ -42,15 +79,18 @@ func Attach(cfg Config, name string) error {
 	done := make(chan struct{})
 	var once sync.Once
 	closeDone := func() { once.Do(func() { close(done) }) }
+	var switchErr *SwitchSessionError
 
 	// Relay server output → stdout.
 	go func() {
 		defer closeDone()
+		var filter outputFilter
 		for {
 			conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 			tag, payload, err := ReadMessage(conn, 1*time.Second)
 			if err != nil {
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				var netErr net.Error
+				if errors.As(err, &netErr) && netErr.Timeout() {
 					select {
 					case <-done:
 						return
@@ -61,7 +101,14 @@ func Attach(cfg Config, name string) error {
 				return
 			}
 			if tag == TagOutput {
-				os.Stdout.Write(payload)
+				filtered, target := filter.Filter(payload)
+				if len(filtered) > 0 {
+					os.Stdout.Write(filtered)
+				}
+				if target != "" {
+					switchErr = &SwitchSessionError{Target: target}
+					return
+				}
 			}
 		}
 	}()
@@ -73,8 +120,7 @@ func Attach(cfg Config, name string) error {
 		for {
 			n, err := os.Stdin.Read(buf)
 			if n > 0 {
-				// Check for Ctrl+\ (0x1C) — detach.
-				if buf[0] == 0x1C {
+				if isDetachKey(buf[:n]) {
 					SendMessage(conn, TagDetach, nil)
 					return
 				}
@@ -99,6 +145,9 @@ func Attach(cfg Config, name string) error {
 	}()
 
 	<-done
+	if switchErr != nil {
+		return switchErr
+	}
 	return nil
 }
 

@@ -2,6 +2,7 @@ package session
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"strconv"
@@ -76,6 +77,20 @@ func ListSessions(cfg Config) ([]Session, error) {
 	return sessions, nil
 }
 
+// RenameSession renames a session by renaming its socket file.
+func RenameSession(cfg Config, oldName, newName string) error {
+	oldPath := cfg.SocketPath(oldName)
+	newPath := cfg.SocketPath(newName)
+
+	if !IsSocket(oldPath) {
+		return fmt.Errorf("session %q not found", oldName)
+	}
+	if IsSocket(newPath) {
+		return fmt.Errorf("session %q already exists", newName)
+	}
+	return os.Rename(oldPath, newPath)
+}
+
 // KillSession sends a kill message to the named session.
 func KillSession(cfg Config, name string) error {
 	path := cfg.SocketPath(name)
@@ -85,4 +100,16 @@ func KillSession(cfg Config, name string) error {
 	}
 	defer conn.Close()
 	return SendMessage(conn, TagKill, nil)
+}
+
+// DetachSession disconnects all attached clients from the named session
+// without killing the daemon or shell process.
+func DetachSession(cfg Config, name string) error {
+	path := cfg.SocketPath(name)
+	conn, err := Connect(path)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	return SendMessage(conn, TagDetachAll, nil)
 }

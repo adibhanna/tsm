@@ -3,6 +3,8 @@ package engine
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestFormatBytes(t *testing.T) {
@@ -148,6 +150,29 @@ func TestTailLinesFromReader_AtLeastOneLine(t *testing.T) {
 	}
 	if got != "solo" {
 		t.Fatalf("tailLinesFromReader = %q, want %q", got, "solo")
+	}
+}
+
+func TestTailLinesFromReaderPreservesANSI(t *testing.T) {
+	input := "one\n\x1b[31mtwo\x1b[0m\nthree\n"
+	got, err := tailLinesFromReader(strings.NewReader(input), 2)
+	if err != nil {
+		t.Fatalf("tailLinesFromReader error: %v", err)
+	}
+	want := "\x1b[31mtwo\x1b[0m\nthree"
+	if got != want {
+		t.Fatalf("tailLinesFromReader = %q, want %q", got, want)
+	}
+}
+
+func TestScrollPreviewPreservesANSIWidth(t *testing.T) {
+	raw := "\x1b[31mhello\x1b[0m world"
+	got := ScrollPreview(raw, 0, 5)
+	if ansi.StringWidth(got) != 5 {
+		t.Fatalf("ScrollPreview width = %d, want 5 (%q)", ansi.StringWidth(got), got)
+	}
+	if !strings.Contains(got, "\x1b[31m") {
+		t.Fatalf("ScrollPreview lost ANSI styling: %q", got)
 	}
 }
 
