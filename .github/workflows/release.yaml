@@ -97,10 +97,10 @@ jobs:
           echo "DARWIN_ARM64_URL=${RELEASE_BASE}/${darwin_arm64}" >> "$GITHUB_ENV"
           echo "LINUX_AMD64_URL=${RELEASE_BASE}/${linux_amd64}" >> "$GITHUB_ENV"
           echo "LINUX_ARM64_URL=${RELEASE_BASE}/${linux_arm64}" >> "$GITHUB_ENV"
-          echo "DARWIN_AMD64_SHA256=$(awk '/_darwin_amd64.tar.gz$/ {print \$1}' checksums.txt)" >> "$GITHUB_ENV"
-          echo "DARWIN_ARM64_SHA256=$(awk '/_darwin_arm64.tar.gz$/ {print \$1}' checksums.txt)" >> "$GITHUB_ENV"
-          echo "LINUX_AMD64_SHA256=$(awk '/_linux_amd64.tar.gz$/ {print \$1}' checksums.txt)" >> "$GITHUB_ENV"
-          echo "LINUX_ARM64_SHA256=$(awk '/_linux_arm64.tar.gz$/ {print \$1}' checksums.txt)" >> "$GITHUB_ENV"
+          echo "DARWIN_AMD64_SHA256=$(awk '/_darwin_amd64.tar.gz$/ {print $1}' checksums.txt)" >> "$GITHUB_ENV"
+          echo "DARWIN_ARM64_SHA256=$(awk '/_darwin_arm64.tar.gz$/ {print $1}' checksums.txt)" >> "$GITHUB_ENV"
+          echo "LINUX_AMD64_SHA256=$(awk '/_linux_amd64.tar.gz$/ {print $1}' checksums.txt)" >> "$GITHUB_ENV"
+          echo "LINUX_ARM64_SHA256=$(awk '/_linux_arm64.tar.gz$/ {print $1}' checksums.txt)" >> "$GITHUB_ENV"
       - name: Clone tap repository
         env:
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
