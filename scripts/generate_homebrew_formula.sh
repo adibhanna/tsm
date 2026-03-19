@@ -17,6 +17,7 @@ class Tsm < Formula
   desc "Terminal session manager with persistent sessions"
   homepage "https://github.com/${REPOSITORY}"
   license "MIT"
+  version "${VERSION}"
 
   on_macos do
     if Hardware::CPU.arm?
@@ -39,10 +40,13 @@ class Tsm < Formula
   end
 
   def install
-    root = Dir.children(buildpath).find { |entry| File.directory?(buildpath/entry) }
-    raise "unexpected archive layout" if root.nil?
+    entries = Dir[buildpath/"*"]
+    if entries.length == 1 && File.directory?(entries.first)
+      entries = Dir[entries.first/"*"]
+    end
+    raise "unexpected archive layout" if entries.empty?
 
-    libexec.install Dir[buildpath/root/"*"]
+    libexec.install entries
     (bin/"tsm").write_env_script(libexec/"tsm", {})
   end
 

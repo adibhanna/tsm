@@ -90,7 +90,7 @@ Remove it with:
 brew uninstall adibhanna/tsm/tsm
 ```
 
-The tap currently builds `tsm` and `libghostty-vt` from source. Once tagged releases are published, the tap is intended to switch to the release archives automatically.
+The supported Homebrew path is the self-contained release archive formula published by the release workflow. A source-backed formula is brittle because Ghostty's Zig build fetches external dependencies during the build, which Homebrew may block in its sandbox. Until tagged release archives are published, prefer the source install.
 
 ### Build from source
 
