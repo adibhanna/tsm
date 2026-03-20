@@ -186,6 +186,8 @@ Each shim provides:
 
 The integration is session-local. Fresh sessions pick up the current integration logic. Existing running sessions keep the shell environment they started with.
 
+This shell integration is intentionally not a global launcher. Opening the picker from a normal shell, terminal app, or Neovim mapping is a separate layer that the user configures outside TSM's in-session shell shim.
+
 ## Rename Handling
 
 Session rename is a daemon-side IPC operation, not just a socket filename rename.

@@ -13,6 +13,7 @@
 
 [shell.shortcuts]
 # Shortcuts are applied inside TSM-managed interactive shells (zsh, bash, fish).
+# They do not create a global launcher outside TSM by themselves.
 # Set an action shortcut to "" to disable it.
 # full = ""          # Open the full TUI from a TSM-managed shell.
 palette = "ctrl+]"   # Open the simplified session palette from a TSM-managed shell.
@@ -29,12 +30,12 @@ attach = ["enter"]               # Attach to the highlighted session.
 detach = ["d"]                   # Detach the selected session(s).
 new_session = ["n"]              # Create a new session.
 kill = ["k"]                     # Kill the selected session(s).
-rename = ["R"]                   # Rename the highlighted session.
+rename = ["r"]                   # Rename the highlighted session.
 copy_command = ["c"]             # Copy `tsm attach <name>`.
 sort = ["s"]                     # Cycle the session sort mode.
 toggle_layout = ["ctrl+o"]       # Switch between simplified and full TUI.
 filter = ["/"]                   # Start filtering sessions.
-refresh = ["r"]                  # Refresh sessions, previews, and agent status.
+refresh = ["ctrl+r"]             # Refresh sessions, previews, and agent status.
 quit = ["q"]                     # Quit the TUI.
 force_quit = ["ctrl+c"]          # Quit immediately.
 log_up = ["["]                   # Scroll the activity log up.
@@ -51,12 +52,12 @@ attach = ["enter"]               # Attach to the highlighted session.
 detach = ["ctrl+d"]              # Detach the selected session(s).
 new_session = ["ctrl+t"]         # Create a new session.
 kill = ["ctrl+x"]                # Kill the selected session(s).
-rename = ["ctrl+r"]              # Rename the highlighted session.
+rename = ["r"]                   # Rename the highlighted session.
 copy_command = ["ctrl+y"]        # Copy `tsm attach <name>`.
 sort = ["ctrl+s"]                # Cycle the session sort mode.
 toggle_layout = ["ctrl+o"]       # Switch between simplified and full TUI.
 filter = ["ctrl+f"]              # Start filtering sessions.
-refresh = ["ctrl+l"]             # Refresh sessions, previews, and agent status.
+refresh = ["ctrl+r"]             # Refresh sessions, previews, and agent status.
 quit = ["q"]                     # Quit the TUI.
 force_quit = ["ctrl+c"]          # Quit immediately.
 log_up = ["["]                   # Scroll the activity log up.

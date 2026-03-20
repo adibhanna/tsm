@@ -333,7 +333,19 @@ Supported action names:
 
 ## Shell Shortcuts
 
-Inside fresh TSM-managed interactive shells:
+Think about shortcuts in three layers:
+
+- built-in in-session shortcut
+- optional global launcher you add yourself
+- app-level mapping inside tools like Neovim
+
+Recommended workflow:
+
+- inside a fresh TSM-managed shell, use the built-in `Ctrl+]` shortcut
+- outside TSM, run `tsm p` directly or add your own global launcher
+- inside apps like Neovim, use your own app mapping or global launcher if you want picker access without going back to the shell prompt
+
+Built-in in-session shortcut:
 
 - `Ctrl+]` opens the simplified palette
 
@@ -366,7 +378,7 @@ tsm_palette() {
 bind -x '"\C-g":tsm_palette'
 ```
 
-`Ctrl+G` is still a reasonable global shell shortcut because it stays out of the built-in `Ctrl+]` TSM shell chord.
+`Ctrl+G` is the recommended global launcher because it stays out of the built-in `Ctrl+]` TSM shell shortcut.
 
 ## Useful Checks
 

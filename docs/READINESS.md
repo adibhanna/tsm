@@ -132,9 +132,14 @@ Why it matters:
 
 Track:
 
-- [ ] document a single recommended workflow clearly
-- [ ] separate “inside TSM shell” from “global launcher” in docs and config guidance
+- [x] document a single recommended workflow clearly
+- [x] separate “inside TSM shell” from “global launcher” in docs and config guidance
 - [ ] evaluate an out-of-band control path for opening the picker from anywhere
+
+In progress:
+
+- README and CLI docs now describe the three shortcut layers explicitly: built-in in-session shortcut, optional global launcher, and app-level mappings
+- the remaining open question is whether TSM should grow a real out-of-band picker control path instead of relying on user-defined global launchers
 
 Relevant areas:
 

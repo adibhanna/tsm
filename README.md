@@ -413,27 +413,38 @@ While the palette keymap is active:
 - `esc` clears the filter
 - if the filter is already empty, `esc` exits
 
-## Quick Session Shortcuts
+## Shortcut Workflow
 
-Inside fresh TSM-managed interactive shells:
+TSM has three shortcut layers:
+
+- built-in in-session shortcuts
+- optional global launchers you add yourself
+- app-level mappings inside tools like Neovim
+
+Recommended workflow:
+
+- inside a fresh TSM-managed shell, use the built-in `Ctrl+]` shortcut
+- outside TSM, run `tsm p` directly or add your own global launcher
+- inside apps like Neovim, use your own app mapping or global launcher if you want picker access without returning to the shell prompt
+
+Built-in in-session shortcut:
 
 - `Ctrl+]` opens the simplified palette
 
-This is provided for:
+Supported built-in shells:
 
 - `zsh`
 - `bash`
 - `fish`
 
-That built-in shortcut only exists inside TSM-managed shells.
+That built-in shortcut is session-local. It only exists inside fresh TSM-managed shells.
 
-If you also want a separate launcher outside TSM sessions, add one in your shell config or terminal config.
-Keeping both is fine:
+If you also want a separate launcher outside TSM sessions, add one in your shell config or terminal config. Keeping both is fine:
 
 - built-in `Ctrl+]` for attached TSM shells
-- your own launcher for normal shells or other contexts
+- your own launcher for normal shells or app contexts
 
-For a shell-level launcher, add this to your shell config.
+Recommended global shell launcher:
 
 For `zsh`:
 
@@ -444,7 +455,7 @@ tsm_palette() {
   zle reset-prompt
 }
 zle -N tsm_palette
-bindkey '^]' tsm_palette
+bindkey '^g' tsm_palette
 ```
 
 For `bash`:
@@ -453,10 +464,10 @@ For `bash`:
 tsm_palette() {
   tsm p
 }
-bind -x '"\C-]":tsm_palette'
+bind -x '"\C-g":tsm_palette'
 ```
 
-`Ctrl+]` is a good global binding because it usually stays free at the shell prompt and avoids the more common history/search chords.
+`Ctrl+G` is a better global default than `Ctrl+]` because it stays separate from TSM's built-in in-session shortcut.
 
 ## Config File
 
@@ -536,6 +547,8 @@ Supported action names:
 - `log_down`
 
 Set `show_help = false` to hide the shortcut guide in the TUI.
+
+`[shell.shortcuts]` config only controls the built-in in-session shell integration. It does not create a global launcher outside TSM by itself.
 
 ## Shell Integration
 

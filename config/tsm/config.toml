@@ -13,6 +13,7 @@
 
 [shell.shortcuts]
 # Shortcuts are applied inside TSM-managed interactive shells (zsh, bash, fish).
+# They do not create a global launcher outside TSM by themselves.
 # Set an action shortcut to "" to disable it.
 # full = ""          # Open the full TUI from a TSM-managed shell.
 palette = "ctrl+]"   # Open the simplified session palette from a TSM-managed shell.
