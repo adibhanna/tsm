@@ -247,6 +247,27 @@ func TestClaudeInternalUserMessagesAreIgnored(t *testing.T) {
 	}
 }
 
+func TestAgentStatusSummaryDoesNotFallBackToCwdName(t *testing.T) {
+	status := agentStatus{Kind: "claude", State: "recent"}
+	if got := agentStatusSummary(status, "/Users/test/work/tsm"); got != "" {
+		t.Fatalf("agentStatusSummary() = %q, want empty summary", got)
+	}
+}
+
+func TestDisplayAgentStateMarksOldRecentAsStale(t *testing.T) {
+	old := time.Now().Add(-20 * time.Minute).Unix()
+	if got := DisplayAgentState("recent", old); got != "stale" {
+		t.Fatalf("DisplayAgentState() = %q, want stale", got)
+	}
+}
+
+func TestDisplayAgentStateKeepsFreshRecentAsIdle(t *testing.T) {
+	fresh := time.Now().Add(-30 * time.Second).Unix()
+	if got := DisplayAgentState("recent", fresh); got != "idle" {
+		t.Fatalf("DisplayAgentState() = %q, want idle", got)
+	}
+}
+
 func fakeCommand(output string) func(string, ...string) *exec.Cmd {
 	return func(string, ...string) *exec.Cmd {
 		script := fmt.Sprintf("cat <<'EOF'\n%sEOF\n", output)

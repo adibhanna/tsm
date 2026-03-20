@@ -166,6 +166,13 @@ Track:
 - [ ] prefer official Claude integration surfaces where possible
 - [ ] keep compact palette output terse and high-signal
 
+In progress:
+
+- low-signal Claude internal messages are filtered out more aggressively
+- empty agent summaries no longer fall back to cwd names like `tsm`
+- stale or very old agent activity now renders as `stale` instead of generic `recent`
+- fresh low-signal fallback activity now renders as `idle` instead of `recent`
+
 Relevant files:
 
 - [internal/engine/agent_status.go](/Users/adibhanna/Developer/opensource/tsm/internal/engine/agent_status.go)

@@ -259,7 +259,7 @@ func (m Model) renderAgentStatusLine(s Session, width int) string {
 
 	parts := []string{
 		kindStyle.Render(displayAgentKind(s.AgentKind)),
-		agentStateStyle.Render(defaultAgentState(s.AgentState)),
+		agentStateStyle.Render(defaultAgentState(s.AgentState, s.AgentUpdated)),
 	}
 	if age := engine.FormatRelativeTime(s.AgentUpdated); age != "" {
 		parts = append(parts, agentMetaStyle.Render(age))
@@ -279,11 +279,8 @@ func (m Model) renderAgentStatusLine(s Session, width int) string {
 	return prefix + "  " + agentMetaStyle.Render("· "+summary)
 }
 
-func defaultAgentState(state string) string {
-	if state == "" {
-		return "active"
-	}
-	return state
+func defaultAgentState(state string, updatedAt int64) string {
+	return engine.DisplayAgentState(state, updatedAt)
 }
 
 func (m Model) renderAgentPreview(s Session, width, height int) string {
@@ -312,7 +309,7 @@ func (m Model) renderAgentPreviewHeader(s Session) string {
 	}
 	parts := []string{
 		kindStyle.Render(displayAgentKind(s.AgentKind)),
-		agentStateStyle.Render(defaultAgentState(s.AgentState)),
+		agentStateStyle.Render(defaultAgentState(s.AgentState, s.AgentUpdated)),
 	}
 	if age := engine.FormatRelativeTime(s.AgentUpdated); age != "" {
 		parts = append(parts, agentMetaStyle.Render(age+" ago"))

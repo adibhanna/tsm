@@ -746,7 +746,27 @@ func agentStatusSummary(status agentStatus, cwd string) string {
 	if status.Summary != "" {
 		return status.Summary
 	}
-	return agentFallbackSummary(cwd)
+	if status.LastPrompt != "" {
+		return status.LastPrompt
+	}
+	return ""
+}
+
+func DisplayAgentState(state string, updatedAt int64) string {
+	state = strings.TrimSpace(strings.ToLower(state))
+	if state == "" {
+		state = "active"
+	}
+	if state == "recent" {
+		state = "idle"
+	}
+	if updatedAt > 0 && time.Since(time.Unix(updatedAt, 0)) > 10*time.Minute {
+		switch state {
+		case "idle", "done", "waiting", "active":
+			return "stale"
+		}
+	}
+	return state
 }
 
 func isUsefulClaudeStatus(status agentStatus, cwd string) bool {

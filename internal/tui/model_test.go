@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -483,6 +484,29 @@ func TestSimplifiedViewShowsSelectedAgentStatus(t *testing.T) {
 	view := stripStyleCodes(m.View().Content)
 	if !strings.Contains(view, "codex") || !strings.Contains(view, "exec: make test") {
 		t.Fatalf("simplified view missing agent status: %q", view)
+	}
+}
+
+func TestSimplifiedViewShowsStaleAgentWithoutFallbackSummary(t *testing.T) {
+	m := NewModel(Options{Mode: ModeSimplified})
+	m.width = 100
+	m.height = 24
+	m.sessions = []Session{{
+		Name:         "alpha",
+		PID:          "1",
+		AgentKind:    "claude",
+		AgentState:   "recent",
+		AgentUpdated: time.Now().Add(-20 * time.Minute).Unix(),
+		StartedIn:    "/Users/test/work/tsm",
+	}}
+	m.markSessionsChanged()
+
+	view := stripStyleCodes(m.View().Content)
+	if !strings.Contains(view, "stale") {
+		t.Fatalf("simplified view missing stale state: %q", view)
+	}
+	if strings.Contains(view, "· tsm") {
+		t.Fatalf("simplified view should not fall back to cwd name summary: %q", view)
 	}
 }
 
