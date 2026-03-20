@@ -1,5 +1,8 @@
 APP      := tsm
 MODULE   := github.com/adibhanna/tsm
+GHOSTTY_REVISION := c9e1006213eb9234209924c91285d6863e59ce4c
+REQUIRED_ZIG_VERSION := $(shell grep '^ZIG_VERSION=' scripts/install_zig.sh | cut -d'"' -f2)
+GO_VERSION := 1.25
 PREFIX   ?= $(HOME)/.local
 BINDIR   ?= $(if $(filter %/bin,$(PREFIX)),$(PREFIX),$(PREFIX)/bin)
 LIBDIR   ?= $(if $(filter %/bin,$(PREFIX)),$(patsubst %/bin,%/lib/tsm,$(PREFIX)),$(PREFIX)/lib/tsm)
@@ -27,23 +30,57 @@ LDFLAGS  := -s -w \
 	-X main.date=$(DATE) \
 	-X main.dirty=$(DIRTY)
 
-.PHONY: build run install uninstall test lint fmt clean help check-ghostty-vt setup-ghostty-vt setup-ghostty-src release
+.PHONY: build run install uninstall test lint fmt clean help check-bootstrap-deps check-ghostty-vt setup-ghostty-vt setup-ghostty-src setup release
 
-setup-ghostty-src: ## Clone ghostty into ./ghostty if missing
-	@test -d ghostty || git clone --depth=1 https://github.com/ghostty-org/ghostty.git ghostty
+check-bootstrap-deps: ## Verify bootstrap tools (go, zig, pkg-config) are available
+	@command -v go >/dev/null 2>&1 || \
+		( echo "go not found." >&2; \
+		  echo "Install Go $(GO_VERSION)+: https://go.dev/dl/ or use mise/asdf." >&2; \
+		  exit 1 )
+	@command -v zig >/dev/null 2>&1 || \
+		( echo "zig not found." >&2; \
+		  echo "Install Zig $(REQUIRED_ZIG_VERSION): https://ziglang.org/download/" >&2; \
+		  echo "Or run: bash scripts/install_zig.sh && export PATH=\"\$$PWD/zig-local:\$$PATH\"" >&2; \
+		  exit 1 )
+	@actual_zig=$$(zig version 2>/dev/null); \
+	if [ "$$actual_zig" != "$(REQUIRED_ZIG_VERSION)" ]; then \
+		echo "zig version mismatch: found $$actual_zig, need $(REQUIRED_ZIG_VERSION)." >&2; \
+		echo "Run: bash scripts/install_zig.sh && export PATH=\"\$$PWD/zig-local:\$$PATH\"" >&2; \
+		exit 1; \
+	fi
+	@command -v pkg-config >/dev/null 2>&1 || \
+		( echo "pkg-config not found." >&2; \
+		  echo "Install it via your package manager (brew install pkg-config, apt install pkg-config)." >&2; \
+		  exit 1 )
+
+setup-ghostty-src: ## Clone ghostty at pinned revision into ./ghostty
+	@if [ ! -d ghostty ]; then \
+		git init ghostty && \
+		git -C ghostty fetch --depth=1 https://github.com/ghostty-org/ghostty.git $(GHOSTTY_REVISION) && \
+		git -C ghostty checkout FETCH_HEAD; \
+	elif [ "$$(git -C ghostty rev-parse HEAD)" != "$(GHOSTTY_REVISION)" ]; then \
+		echo "ghostty/ exists but is at $$(git -C ghostty rev-parse --short HEAD), expected $(GHOSTTY_REVISION)." >&2; \
+		echo "Updating to pinned revision..." >&2; \
+		git -C ghostty fetch --depth=1 https://github.com/ghostty-org/ghostty.git $(GHOSTTY_REVISION) && \
+		git -C ghostty checkout FETCH_HEAD; \
+	fi
 
 check-ghostty-vt:
 	@env $(BUILD_ENV) pkg-config --exists libghostty-vt || \
 		( echo "libghostty-vt not found." >&2; \
 		  echo "Looked in: $(GHOSTTY_PREFIX)/share/pkgconfig and $(GHOSTTY_PREFIX)/lib/pkgconfig" >&2; \
-		  echo "Build/install it first, or override GHOSTTY_PREFIX=/path/to/prefix." >&2; \
-		  echo "Example:" >&2; \
-		  echo "  git clone https://github.com/ghostty-org/ghostty.git ghostty" >&2; \
-		  echo "  cd ghostty && zig build lib-vt --prefix $(GHOSTTY_PREFIX)" >&2; \
+		  echo "Run 'make setup' to bootstrap the build environment, or override GHOSTTY_PREFIX=/path/to/prefix." >&2; \
 		  exit 1 )
 
 setup-ghostty-vt: setup-ghostty-src ## Build libghostty-vt into ./.ghostty-prefix from ./ghostty
 	cd ghostty && zig build lib-vt --prefix "$(LOCAL_GHOSTTY_PREFIX)"
+
+setup: check-bootstrap-deps setup-ghostty-vt ## First-time setup: verify deps and build libghostty-vt
+	@echo ""
+	@echo "Setup complete. You can now run:"
+	@echo "  make build    # build tsm"
+	@echo "  make test     # run tests"
+	@echo "  make lint     # run linter"
 
 release: check-ghostty-vt ## Build a self-contained current-platform release archive in dist/
 	bash scripts/release_current_platform.sh

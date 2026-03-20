@@ -3,3 +3,4 @@ tsm
 dist/
 ghostty/
 .ghostty-prefix/
+zig-local/

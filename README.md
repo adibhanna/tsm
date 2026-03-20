@@ -94,16 +94,20 @@ The supported Homebrew path is the self-contained release archive formula publis
 
 ### Build from source
 
-If you want the Ghostty-backed build from source:
+Prerequisites:
+
+- [Go](https://go.dev/dl/) 1.25+
+- [Zig](https://ziglang.org/download/) 0.15.2
+- `pkg-config` (`brew install pkg-config` on macOS, `apt install pkg-config` on Linux)
 
 ```bash
 git clone https://github.com/adibhanna/tsm.git
 cd tsm
-make setup-ghostty-vt
+make setup
 make build
 ```
 
-That clones Ghostty into `./ghostty`, builds `libghostty-vt` into `./.ghostty-prefix`, and links `tsm` against it.
+`make setup` verifies prerequisites, clones Ghostty into `./ghostty`, and builds `libghostty-vt` into `./.ghostty-prefix`. After that, `make build`, `make test`, and `make lint` all work.
 
 Install under a user prefix:
 
