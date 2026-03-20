@@ -71,6 +71,9 @@ Supported bundled release targets:
 - Linux `amd64`
 - Linux `arm64`
 
+See [docs/COMPATIBILITY.md](/Users/adibhanna/Developer/opensource/tsm/docs/COMPATIBILITY.md) for the current OS, shell, terminal, and agent-support contract.
+See [docs/KNOWN_LIMITATIONS.md](/Users/adibhanna/Developer/opensource/tsm/docs/KNOWN_LIMITATIONS.md) for the current product boundaries and caveats.
+
 Download the matching archive from GitHub Releases, extract it, and place `tsm` on your `PATH`.
 
 ### Homebrew
@@ -285,8 +288,10 @@ It reports:
 - socket directory
 - `pkg-config` and `libghostty-vt` availability
 - live versus stale session sockets
+- live sessions still running an older daemon build
+- orphaned per-session sidecars with no matching socket
 
-If `tsm doctor` reports stale sockets, clean them up with:
+If `tsm doctor` reports stale sockets or orphaned sidecars, clean them up with:
 
 ```bash
 tsm doctor clean-stale

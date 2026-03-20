@@ -547,6 +547,9 @@ func TestDoctorReportNoSessions(t *testing.T) {
 	if !strings.Contains(report, "sessions:\n  none") {
 		t.Fatalf("report missing empty sessions section: %q", report)
 	}
+	if !strings.Contains(report, "artifacts:\n  none") {
+		t.Fatalf("report missing empty artifacts section: %q", report)
+	}
 	if !strings.Contains(report, filepath.Join(configHome, "tsm", "config.toml")+" (missing)") {
 		t.Fatalf("report missing config path/state: %q", report)
 	}
@@ -595,6 +598,100 @@ func TestDoctorReportLiveAndStaleSockets(t *testing.T) {
 	}
 	if !strings.Contains(report, `- stale: stale (connect: connection refused)`) {
 		t.Fatalf("report missing stale session details: %q", report)
+	}
+}
+
+func TestDoctorReportFlagsOlderDaemonBuild(t *testing.T) {
+	socketDir := t.TempDir()
+	configHome := t.TempDir()
+	t.Setenv("TSM_DIR", socketDir)
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+
+	cfg := session.DefaultConfig()
+	if err := os.WriteFile(cfg.SocketPath("live"), nil, 0o600); err != nil {
+		t.Fatalf("write fake socket: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(session.ClaudeStatuslinePath(cfg, "live")), 0o750); err != nil {
+		t.Fatalf("mkdir sidecar dir: %v", err)
+	}
+	infoPath := filepath.Join(cfg.LogDir, "daemon-build", "live.json")
+	if err := os.MkdirAll(filepath.Dir(infoPath), 0o750); err != nil {
+		t.Fatalf("mkdir build dir: %v", err)
+	}
+	if err := os.WriteFile(infoPath, []byte(`{"executable":"/old/tsm","mod_time_unix":1}`), 0o644); err != nil {
+		t.Fatalf("write daemon build info: %v", err)
+	}
+
+	restoreDoctorFns := stubDoctorFns()
+	defer restoreDoctorFns()
+	doctorExecutable = func() (string, error) { return "/tmp/tsm", nil }
+	doctorLookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
+	doctorGhosttyStatus = func(backend string, pkgConfigErr error) string { return "ok" }
+	doctorIsSocket = func(path string) bool { return strings.HasSuffix(path, "/live") }
+	doctorProbe = func(path string) (*session.InfoPayload, error) {
+		return &session.InfoPayload{}, nil
+	}
+
+	report, err := doctorReport(os.Getenv)
+	if err != nil {
+		t.Fatalf("doctorReport: %v", err)
+	}
+	if !strings.Contains(report, `[older daemon build]`) {
+		t.Fatalf("report missing build mismatch marker: %q", report)
+	}
+}
+
+func TestDoctorReportOrphanedArtifacts(t *testing.T) {
+	socketDir := t.TempDir()
+	logDir := filepath.Join(socketDir, "logs")
+	configHome := t.TempDir()
+	t.Setenv("TSM_DIR", socketDir)
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+
+	cfg := session.DefaultConfig()
+	for _, path := range []string{
+		filepath.Join(logDir, "daemon-build", "orphan.json"),
+		filepath.Join(logDir, "claude-statusline", "orphan.json"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatalf("mkdir sidecar dir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write sidecar: %v", err)
+		}
+	}
+	if err := os.WriteFile(cfg.SocketPath("live"), nil, 0o600); err != nil {
+		t.Fatalf("write fake socket: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(session.ClaudeStatuslinePath(cfg, "live")), 0o750); err != nil {
+		t.Fatalf("mkdir live sidecar dir: %v", err)
+	}
+	if err := os.WriteFile(session.ClaudeStatuslinePath(cfg, "live"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write live sidecar: %v", err)
+	}
+
+	restoreDoctorFns := stubDoctorFns()
+	defer restoreDoctorFns()
+	doctorExecutable = func() (string, error) { return "/tmp/tsm", nil }
+	doctorLookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
+	doctorGhosttyStatus = func(backend string, pkgConfigErr error) string { return "ok" }
+	doctorIsSocket = func(path string) bool { return strings.HasSuffix(path, "/live") }
+	doctorProbe = func(path string) (*session.InfoPayload, error) {
+		if strings.HasSuffix(path, "/live") {
+			return &session.InfoPayload{}, nil
+		}
+		return nil, errors.New("connect: connection refused")
+	}
+
+	report, err := doctorReport(os.Getenv)
+	if err != nil {
+		t.Fatalf("doctorReport: %v", err)
+	}
+	if !strings.Contains(report, "artifacts:\n  - orphan: orphaned claude-statusline, daemon-build") {
+		t.Fatalf("report missing orphaned artifacts: %q", report)
+	}
+	if strings.Contains(report, "live: orphaned") {
+		t.Fatalf("report should not mark live session artifacts as orphaned: %q", report)
 	}
 }
 
@@ -764,6 +861,47 @@ func TestCleanStaleSocketsRemovesOnlyStaleEntries(t *testing.T) {
 	}
 	if len(removedPaths) != 1 || removedPaths[0] != cfg.SocketPath("stale") {
 		t.Fatalf("removedPaths = %#v, want stale socket path", removedPaths)
+	}
+}
+
+func TestCleanStaleArtifactsRemovesOnlyOrphanedSidecars(t *testing.T) {
+	socketDir := t.TempDir()
+	t.Setenv("TSM_DIR", socketDir)
+	cfg := session.DefaultConfig()
+
+	for _, path := range []string{
+		session.ClaudeStatuslinePath(cfg, "orphan"),
+		filepath.Join(cfg.LogDir, "daemon-build", "orphan.json"),
+		session.ClaudeStatuslinePath(cfg, "live"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatalf("mkdir sidecar dir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write sidecar: %v", err)
+		}
+	}
+	if err := os.WriteFile(cfg.SocketPath("live"), nil, 0o600); err != nil {
+		t.Fatalf("write fake live socket: %v", err)
+	}
+
+	removed, err := cleanStaleArtifacts(cfg)
+	if err != nil {
+		t.Fatalf("cleanStaleArtifacts: %v", err)
+	}
+	if len(removed) != 1 || removed[0].Name != "orphan" {
+		t.Fatalf("removed = %#v, want orphan only", removed)
+	}
+	for _, path := range []string{
+		session.ClaudeStatuslinePath(cfg, "orphan"),
+		filepath.Join(cfg.LogDir, "daemon-build", "orphan.json"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected orphan sidecar %q removed, err=%v", path, err)
+		}
+	}
+	if _, err := os.Stat(session.ClaudeStatuslinePath(cfg, "live")); err != nil {
+		t.Fatalf("expected live sidecar to remain: %v", err)
 	}
 }
 

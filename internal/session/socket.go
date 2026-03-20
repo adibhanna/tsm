@@ -94,7 +94,7 @@ func CleanStaleSocket(path string) error {
 	}
 	cfg := DefaultConfig()
 	if filepath.Dir(path) == cfg.SocketDir {
-		_ = RemoveSessionArtifacts(cfg, filepath.Base(path))
+		_ = RemoveSessionRuntimeFiles(cfg, filepath.Base(path))
 	}
 	return nil
 }

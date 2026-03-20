@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -306,15 +307,8 @@ func attachSession(cfg session.Config, name string, createIfMissing bool) error 
 }
 
 func daemonBuildWarning(cfg session.Config, name string) string {
-	daemonInfo, err := session.ReadDaemonBuildInfo(cfg, name)
-	if err != nil || daemonInfo.ModTimeUnix == 0 {
-		return ""
-	}
 	currentInfo, err := session.CurrentBuildInfo()
-	if err != nil || currentInfo.ModTimeUnix == 0 {
-		return ""
-	}
-	if daemonInfo.Executable == currentInfo.Executable && daemonInfo.ModTimeUnix == currentInfo.ModTimeUnix {
+	if !daemonBuildMismatch(cfg, name, currentInfo, err) {
 		return ""
 	}
 	return fmt.Sprintf("Warning: session %q is running an older tsm daemon build.\nRecreate the session to pick up the latest session logic if behavior looks stale.", name)
@@ -466,17 +460,26 @@ func cmdDoctor() {
 }
 
 func cmdDoctorCleanStale() {
-	removed, err := cleanStaleSockets(session.DefaultConfig())
+	cfg := session.DefaultConfig()
+	removedSockets, err := cleanStaleSockets(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Doctor clean-stale error: %v\n", err)
 		os.Exit(1)
 	}
-	if len(removed) == 0 {
-		fmt.Println("No stale sockets found")
+	removedArtifacts, err := cleanStaleArtifacts(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Doctor clean-stale error: %v\n", err)
+		os.Exit(1)
+	}
+	if len(removedSockets) == 0 && len(removedArtifacts) == 0 {
+		fmt.Println("No stale sockets or orphaned artifacts found")
 		return
 	}
-	for _, name := range removed {
+	for _, name := range removedSockets {
 		fmt.Printf("Removed stale socket %q\n", name)
+	}
+	for _, status := range removedArtifacts {
+		fmt.Printf("Removed orphaned artifacts for %q (%s)\n", status.Name, strings.Join(status.Kinds, ", "))
 	}
 }
 
@@ -711,35 +714,55 @@ func doctorReport(getenv func(string) string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	artifactStatuses, err := doctorArtifactStatuses(cfg)
+	if err != nil {
+		return "", err
+	}
 
 	fmt.Fprintf(&b, "sessions:\n")
 	if len(socketStatuses) == 0 {
 		fmt.Fprintf(&b, "  none\n")
-		return b.String(), nil
-	}
-	for _, status := range socketStatuses {
-		if status.Err != "" {
-			fmt.Fprintf(&b, "  - %s: stale (%s)\n", status.Name, status.Err)
-			continue
+	} else {
+		for _, status := range socketStatuses {
+			if status.Err != "" {
+				fmt.Fprintf(&b, "  - %s: stale (%s)\n", status.Name, status.Err)
+				continue
+			}
+			fmt.Fprintf(
+				&b,
+				"  - %s: live pid=%d clients=%d cmd=%q dir=%q%s\n",
+				status.Name,
+				status.Info.PID,
+				status.Info.ClientsLen,
+				status.Info.CmdString(),
+				status.Info.CwdString(),
+				formatDoctorBuildSuffix(status.BuildMismatch),
+			)
 		}
-		fmt.Fprintf(
-			&b,
-			"  - %s: live pid=%d clients=%d cmd=%q dir=%q\n",
-			status.Name,
-			status.Info.PID,
-			status.Info.ClientsLen,
-			status.Info.CmdString(),
-			status.Info.CwdString(),
-		)
+	}
+
+	fmt.Fprintf(&b, "artifacts:\n")
+	if len(artifactStatuses) == 0 {
+		fmt.Fprintf(&b, "  none\n")
+	} else {
+		for _, status := range artifactStatuses {
+			fmt.Fprintf(&b, "  - %s: orphaned %s\n", status.Name, strings.Join(status.Kinds, ", "))
+		}
 	}
 
 	return b.String(), nil
 }
 
 type doctorSocketStatus struct {
-	Name string
-	Info *session.InfoPayload
-	Err  string
+	Name          string
+	Info          *session.InfoPayload
+	Err           string
+	BuildMismatch bool
+}
+
+type doctorArtifactStatus struct {
+	Name  string
+	Kinds []string
 }
 
 func doctorSocketStatuses(cfg session.Config) ([]doctorSocketStatus, error) {
@@ -752,6 +775,7 @@ func doctorSocketStatuses(cfg session.Config) ([]doctorSocketStatus, error) {
 	}
 
 	statuses := make([]doctorSocketStatus, 0, len(entries))
+	currentBuild, currentBuildErr := session.CurrentBuildInfo()
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -770,8 +794,9 @@ func doctorSocketStatuses(cfg session.Config) ([]doctorSocketStatus, error) {
 			continue
 		}
 		statuses = append(statuses, doctorSocketStatus{
-			Name: name,
-			Info: info,
+			Name:          name,
+			Info:          info,
+			BuildMismatch: daemonBuildMismatch(cfg, name, currentBuild, currentBuildErr),
 		})
 	}
 
@@ -797,6 +822,47 @@ func cleanStaleSockets(cfg session.Config) ([]string, error) {
 	}
 
 	return removed, nil
+}
+
+func doctorArtifactStatuses(cfg session.Config) ([]doctorArtifactStatus, error) {
+	artifacts, err := session.ListSessionArtifacts(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	bySession := make(map[string][]string)
+	for _, artifact := range artifacts {
+		path := cfg.SocketPath(artifact.Session)
+		if _, err := os.Lstat(path); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return nil, err
+		}
+		bySession[artifact.Session] = append(bySession[artifact.Session], artifact.Kind)
+	}
+
+	statuses := make([]doctorArtifactStatus, 0, len(bySession))
+	for name, kinds := range bySession {
+		statuses = append(statuses, doctorArtifactStatus{Name: name, Kinds: kinds})
+	}
+	sort.Slice(statuses, func(i, j int) bool { return statuses[i].Name < statuses[j].Name })
+	for i := range statuses {
+		sort.Strings(statuses[i].Kinds)
+	}
+	return statuses, nil
+}
+
+func cleanStaleArtifacts(cfg session.Config) ([]doctorArtifactStatus, error) {
+	statuses, err := doctorArtifactStatuses(cfg)
+	if err != nil {
+		return nil, err
+	}
+	for _, status := range statuses {
+		if err := session.RemoveSessionArtifacts(cfg, status.Name); err != nil {
+			return nil, err
+		}
+	}
+	return statuses, nil
 }
 
 func detectGhosttyStatus(backend string, pkgConfigErr error) string {
@@ -831,6 +897,24 @@ func formatSessionActionError(action, name string, err error) string {
 	}
 
 	return fmt.Sprintf("Cannot %s session %q: %v\nRun 'tsm debug session %s' for details, or 'tsm doctor' for a broader health check.", action, name, err, name)
+}
+
+func daemonBuildMismatch(cfg session.Config, name string, currentInfo session.DaemonBuildInfo, currentErr error) bool {
+	daemonInfo, err := session.ReadDaemonBuildInfo(cfg, name)
+	if err != nil || daemonInfo.ModTimeUnix == 0 {
+		return false
+	}
+	if currentErr != nil || currentInfo.ModTimeUnix == 0 {
+		return false
+	}
+	return daemonInfo.Executable != currentInfo.Executable || daemonInfo.ModTimeUnix != currentInfo.ModTimeUnix
+}
+
+func formatDoctorBuildSuffix(mismatch bool) string {
+	if !mismatch {
+		return ""
+	}
+	return " [older daemon build]"
 }
 
 func debugSessionReport(cfg session.Config, name string) (string, bool, error) {

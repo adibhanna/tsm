@@ -181,7 +181,7 @@ Relevant files:
 - [internal/engine/agent_status.go](/Users/adibhanna/Developer/opensource/tsm/internal/engine/agent_status.go)
 - [internal/tui/model_view.go](/Users/adibhanna/Developer/opensource/tsm/internal/tui/model_view.go)
 
-### 7. Smooth Session Lifecycle Edge Cases
+### ~~7. Smooth Session Lifecycle Edge Cases~~ Done
 
 Problem:
 
@@ -191,17 +191,15 @@ Why it matters:
 
 - these are the issues that make a session manager feel “haunted”
 
-Track:
+Shipped:
 
-- [ ] improve behavior when old daemons are still running after a rebuild
-- [ ] reduce shell-specific sharp edges
-- [ ] audit detach/kill/quit screen cleanup paths
-- [ ] improve crash cleanup and stale resource handling
-
-In progress:
-
-- session daemons now record the binary path and build mtime they were started with
-- attach now warns when a session is still running an older daemon build after a rebuild, instead of silently making the new binary look ineffective
+- session daemons record the binary path and build mtime they were started with
+- `tsm attach` warns when a session is still running an older daemon build after a rebuild
+- `tsm doctor` flags live sessions that are running an older daemon build
+- stale socket cleanup prunes known per-session sidecars and orphaned sidecars with no socket
+- renamed-session cleanup removes shell integration state and sidecars for both the original and final session names when the daemon exits
+- CLI integration coverage now explicitly checks terminal recovery on detach, kill, and normal remote command exit
+- shell shortcut defaults were simplified to reduce shell-specific conflicts and remove the old prefix-mode complexity
 
 Relevant areas:
 
@@ -225,15 +223,15 @@ Track:
 
 - [ ] publish tagged releases regularly
 - [ ] verify Homebrew install from published release artifacts
-- [ ] publish release notes with notable behavior changes
-- [ ] document OS, shell, and terminal compatibility
+- [x] publish release notes with notable behavior changes
+- [x] document OS, shell, and terminal compatibility
 
 Relevant files:
 
 - [.github/workflows/release.yaml](/Users/adibhanna/Developer/opensource/tsm/.github/workflows/release.yaml)
 - [Formula/tsm.rb](/Users/adibhanna/Developer/opensource/tsm/Formula/tsm.rb)
 
-### 9. Reintroduce a Known Limitations Document
+### ~~9. Reintroduce a Known Limitations Document~~ Done
 
 Problem:
 
@@ -245,14 +243,14 @@ Why it matters:
 
 Track:
 
-- [ ] document no-pane/no-split scope clearly
-- [ ] document shell shortcut scope clearly
-- [ ] document agent activity as advisory status
-- [ ] document when fresh sessions are needed after integration changes
+- [x] document no-pane/no-split scope clearly
+- [x] document shell shortcut scope clearly
+- [x] document agent activity as advisory status
+- [x] document when fresh sessions are needed after integration changes
 
 Suggested location:
 
-- `docs/KNOWN_LIMITATIONS.md`
+- [x] `docs/KNOWN_LIMITATIONS.md`
 
 ## Suggested Execution Order
 

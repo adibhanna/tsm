@@ -236,6 +236,56 @@ func TestCLIAttachDetachReattach(t *testing.T) {
 	waitExit(cmd2, 5*time.Second)
 }
 
+// TestCLIDetachTerminalRecovery verifies that a normal Ctrl+\ detach exits the
+// attached client through the same terminal cleanup path as kill/remote exit.
+func TestCLIDetachTerminalRecovery(t *testing.T) {
+	needsBinary(t)
+	dir := cliTestDir(t)
+	errCh := startCLIDaemon(t, dir, "sess", []string{"cat"})
+	defer cliKillAndWait(dir, "sess", errCh)
+
+	cmd := exec.Command(tsmBinary, "attach", "sess")
+	cmd.Env = cliEnv(dir)
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 80})
+	if err != nil {
+		t.Fatalf("pty start: %v", err)
+	}
+	defer ptmx.Close()
+
+	outputCh := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		tmp := make([]byte, 4096)
+		for {
+			n, err := ptmx.Read(tmp)
+			if n > 0 {
+				buf.Write(tmp[:n])
+			}
+			if err != nil {
+				break
+			}
+		}
+		outputCh <- buf.String()
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+	ptmx.Write([]byte{0x1c})
+	if err := waitExit(cmd, 5*time.Second); err != nil {
+		t.Fatalf("attach didn't exit after detach: %v", err)
+	}
+
+	var output string
+	select {
+	case output = <-outputCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout collecting PTY output")
+	}
+	if !strings.Contains(output, "\033[?25h") {
+		t.Logf("output after detach (%d bytes): %q", len(output), output)
+		t.Fatal("expected terminal reset (cursor show) in output after detach")
+	}
+}
+
 // TestCLILocalSwitch verifies that `tsm attach B` from inside session A
 // emits the switch sequence instead of nesting an attach.
 func TestCLILocalSwitch(t *testing.T) {
@@ -323,6 +373,54 @@ func TestCLIKillTerminalRecovery(t *testing.T) {
 	if !strings.Contains(output, "\033[?25h") {
 		t.Logf("output after kill (%d bytes): %q", len(output), output)
 		t.Fatal("expected terminal reset (cursor show) in output after kill")
+	}
+}
+
+// TestCLICommandExitTerminalRecovery verifies that when the session command
+// exits on its own, the attached client still restores the local terminal.
+func TestCLICommandExitTerminalRecovery(t *testing.T) {
+	needsBinary(t)
+	dir := cliTestDir(t)
+	errCh := startCLIDaemon(t, dir, "oneshot", []string{"sh", "-c", "sleep 1"})
+	t.Cleanup(func() { cliKillAndWait(dir, "oneshot", errCh) })
+
+	cmd := exec.Command(tsmBinary, "attach", "oneshot")
+	cmd.Env = cliEnv(dir)
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 80})
+	if err != nil {
+		t.Fatalf("pty start: %v", err)
+	}
+	defer ptmx.Close()
+
+	outputCh := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		tmp := make([]byte, 4096)
+		for {
+			n, err := ptmx.Read(tmp)
+			if n > 0 {
+				buf.Write(tmp[:n])
+			}
+			if err != nil {
+				break
+			}
+		}
+		outputCh <- buf.String()
+	}()
+
+	if err := waitExit(cmd, 5*time.Second); err != nil {
+		t.Fatalf("attach didn't exit after remote command exit: %v", err)
+	}
+
+	var output string
+	select {
+	case output = <-outputCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout collecting PTY output")
+	}
+	if !strings.Contains(output, "\033[?25h") {
+		t.Logf("output after remote exit (%d bytes): %q", len(output), output)
+		t.Fatal("expected terminal reset (cursor show) in output after remote exit")
 	}
 }
 

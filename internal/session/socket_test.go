@@ -111,6 +111,7 @@ func TestCleanStaleSocketRemovesSessionArtifacts(t *testing.T) {
 	for _, path := range []string{
 		daemonBuildInfoPath(cfg, "demo"),
 		ClaudeStatuslinePath(cfg, "demo"),
+		filepath.Join(shellIntegrationDir(cfg, "zsh", "demo"), ".tsm-session-name"),
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			t.Fatal(err)
@@ -122,7 +123,7 @@ func TestCleanStaleSocketRemovesSessionArtifacts(t *testing.T) {
 	if err := CleanStaleSocket(sockPath); err != nil {
 		t.Fatalf("CleanStaleSocket: %v", err)
 	}
-	for _, path := range []string{sockPath, daemonBuildInfoPath(cfg, "demo"), ClaudeStatuslinePath(cfg, "demo")} {
+	for _, path := range []string{sockPath, daemonBuildInfoPath(cfg, "demo"), ClaudeStatuslinePath(cfg, "demo"), shellIntegrationDir(cfg, "zsh", "demo")} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("expected %q removed, err=%v", path, err)
 		}

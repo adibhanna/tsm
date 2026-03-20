@@ -143,8 +143,10 @@ It includes:
 - socket directory
 - `pkg-config` / `libghostty-vt` availability
 - live and stale session sockets
+- live sessions still running an older daemon build
+- orphaned per-session sidecars with no matching socket
 
-If stale sockets are reported, remove them with:
+If stale sockets or orphaned sidecars are reported, remove them with:
 
 ```bash
 tsm doctor clean-stale
@@ -160,6 +162,9 @@ It includes:
 - command and cwd
 - task end state when available
 - a short current preview snapshot
+
+For the broader support matrix, see [COMPATIBILITY.md](/Users/adibhanna/Developer/opensource/tsm/docs/COMPATIBILITY.md).
+For product boundaries and caveats, see [KNOWN_LIMITATIONS.md](/Users/adibhanna/Developer/opensource/tsm/docs/KNOWN_LIMITATIONS.md).
 
 ## TUI Entry Points
 

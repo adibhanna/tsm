@@ -61,6 +61,7 @@ type clientState struct {
 // This is called in the re-exec'd daemon subprocess.
 func StartDaemon(name string, shellCmd []string) error {
 	cfg := DefaultConfig()
+	originalName := name
 
 	// Ensure socket directory exists.
 	if err := os.MkdirAll(cfg.SocketDir, 0750); err != nil {
@@ -80,7 +81,6 @@ func StartDaemon(name string, shellCmd []string) error {
 	}
 	defer ln.Close()
 	defer os.Remove(sockPath)
-	defer RemoveDaemonBuildInfo(cfg, name)
 	if err := writeDaemonBuildInfo(cfg, name); err != nil {
 		return fmt.Errorf("write daemon build info: %w", err)
 	}
@@ -127,6 +127,12 @@ func StartDaemon(name string, shellCmd []string) error {
 		sessionNameFile: sessionNameFilePath(cfg, shellIntegrationMode(shell, shellCmd), name),
 	}
 	defer d.terminal.Close()
+	defer func() {
+		d.mu.RLock()
+		currentName := d.name
+		d.mu.RUnlock()
+		_ = RemoveSessionRuntimeFiles(cfg, originalName, currentName)
+	}()
 
 	// Handle signals.
 	sigCh := make(chan os.Signal, 1)

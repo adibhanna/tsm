@@ -56,3 +56,35 @@ func TestRenameSessionArtifactsMovesKnownSidecars(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveSessionRuntimeFilesRemovesSidecarsAndShellDirs(t *testing.T) {
+	cfg := Config{SocketDir: t.TempDir(), LogDir: filepath.Join(t.TempDir(), "logs")}
+	for _, path := range []string{
+		daemonBuildInfoPath(cfg, "demo"),
+		ClaudeStatuslinePath(cfg, "demo"),
+		filepath.Join(shellIntegrationDir(cfg, "zsh", "demo"), ".zshrc"),
+		filepath.Join(shellIntegrationDir(cfg, "bash", "demo"), ".bashrc"),
+		filepath.Join(shellIntegrationDir(cfg, "fish", "demo"), "fish", "config.fish"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := RemoveSessionRuntimeFiles(cfg, "demo"); err != nil {
+		t.Fatalf("RemoveSessionRuntimeFiles: %v", err)
+	}
+	for _, path := range []string{
+		daemonBuildInfoPath(cfg, "demo"),
+		ClaudeStatuslinePath(cfg, "demo"),
+		shellIntegrationDir(cfg, "zsh", "demo"),
+		shellIntegrationDir(cfg, "bash", "demo"),
+		shellIntegrationDir(cfg, "fish", "demo"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected %q removed, err=%v", path, err)
+		}
+	}
+}

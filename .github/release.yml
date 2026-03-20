@@ -1,0 +1,32 @@
+changelog:
+  categories:
+    - title: Breaking Changes
+      labels:
+        - breaking-change
+    - title: Session Lifecycle
+      labels:
+        - session
+        - lifecycle
+    - title: TUI and UX
+      labels:
+        - tui
+        - ux
+    - title: Agent Integration
+      labels:
+        - agent
+        - claude
+        - codex
+    - title: Build, Release, and Packaging
+      labels:
+        - build
+        - ci
+        - release
+        - packaging
+    - title: Documentation
+      labels:
+        - docs
+  exclude:
+    labels:
+      - skip-changelog
+    authors:
+      - github-actions[bot]

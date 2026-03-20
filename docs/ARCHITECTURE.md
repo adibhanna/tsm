@@ -92,7 +92,7 @@ Each daemon also writes a small build-metadata sidecar. That lets newer clients 
 3. environment
 4. CLI flags
 
-It also owns user-facing diagnostics like `tsm doctor`, which reports runtime config, backend availability, and live vs stale session sockets.
+It also owns user-facing diagnostics like `tsm doctor`, which reports runtime config, backend availability, live vs stale session sockets, older daemon builds, and orphaned per-session sidecars.
 
 ## IPC Protocol
 
