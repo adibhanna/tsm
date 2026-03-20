@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -86,7 +87,14 @@ func IsSocket(path string) bool {
 	return fi.Mode().Type()&os.ModeSocket != 0
 }
 
-// CleanStaleSocket removes a socket file for a dead session.
+// CleanStaleSocket removes a socket file for a dead session and prunes session sidecars.
 func CleanStaleSocket(path string) error {
-	return os.Remove(path)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	cfg := DefaultConfig()
+	if filepath.Dir(path) == cfg.SocketDir {
+		_ = RemoveSessionArtifacts(cfg, filepath.Base(path))
+	}
+	return nil
 }

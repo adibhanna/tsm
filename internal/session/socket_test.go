@@ -99,3 +99,32 @@ func TestIsSocket(t *testing.T) {
 		t.Error("nonexistent path should not be a socket")
 	}
 }
+
+func TestCleanStaleSocketRemovesSessionArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TSM_DIR", dir)
+	cfg := DefaultConfig()
+	sockPath := cfg.SocketPath("demo")
+	if err := os.WriteFile(sockPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		daemonBuildInfoPath(cfg, "demo"),
+		ClaudeStatuslinePath(cfg, "demo"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := CleanStaleSocket(sockPath); err != nil {
+		t.Fatalf("CleanStaleSocket: %v", err)
+	}
+	for _, path := range []string{sockPath, daemonBuildInfoPath(cfg, "demo"), ClaudeStatuslinePath(cfg, "demo")} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected %q removed, err=%v", path, err)
+		}
+	}
+}

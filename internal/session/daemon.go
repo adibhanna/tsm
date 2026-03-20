@@ -365,6 +365,11 @@ func (d *Daemon) renameSession(newName string) error {
 		_ = os.Rename(newPath, oldPath)
 		return fmt.Errorf("update session name file: %w", err)
 	}
+	if err := RenameSessionArtifacts(d.cfg, d.name, newName); err != nil {
+		_ = writeSessionNameFile(d.sessionNameFile, d.name)
+		_ = os.Rename(newPath, oldPath)
+		return fmt.Errorf("rename session artifacts: %w", err)
+	}
 	d.name = newName
 	return nil
 }
