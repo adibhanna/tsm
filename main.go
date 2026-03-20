@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/adibhanna/tsm/internal/appconfig"
+	"github.com/adibhanna/tsm/internal/engine"
 	"github.com/adibhanna/tsm/internal/session"
 	"github.com/adibhanna/tsm/internal/tui"
 )
@@ -22,7 +24,19 @@ var (
 	commit  = "none"
 	date    = "unknown"
 	dirty   = "false"
+
+	doctorExecutable    = os.Executable
+	doctorLookPath      = exec.LookPath
+	doctorRunCommand    = runCommand
+	doctorReadDir       = os.ReadDir
+	doctorProbe         = session.ProbeSession
+	doctorIsSocket      = session.IsSocket
+	doctorGhosttyStatus = detectGhosttyStatus
+	doctorCleanSocket   = session.CleanStaleSocket
+	debugFetchPreview   = engine.FetchPreview
 )
+
+var errSessionPathNotSocket = errors.New("session path exists and is not a socket")
 
 func main() {
 	// Internal daemon mode — not user-facing.
@@ -66,6 +80,10 @@ func main() {
 		cmdKill()
 	case "version", "v", "-v", "--version":
 		fmt.Println(versionString(session.RestoreBackendName()))
+	case "doctor":
+		cmdDoctor()
+	case "debug":
+		cmdDebug()
 	case "help", "h", "-h", "--help":
 		printUsage()
 	default:
@@ -91,7 +109,7 @@ func cmdAttach() {
 				os.Exit(1)
 			}
 			if err := attachSession(cfg, name, true); err != nil {
-				fmt.Fprintf(os.Stderr, "Attach error: %v\n", err)
+				fmt.Fprintln(os.Stderr, formatSessionActionError("attach", name, err))
 				os.Exit(1)
 			}
 			fmt.Fprintf(os.Stdout, "\r\n[detached from %s]\r\n", name)
@@ -99,7 +117,7 @@ func cmdAttach() {
 		case 1:
 			name := sessions[0].Name
 			if err := attachSession(cfg, name, false); err != nil {
-				fmt.Fprintf(os.Stderr, "Attach error: %v\n", err)
+				fmt.Fprintln(os.Stderr, formatSessionActionError("attach", name, err))
 				os.Exit(1)
 			}
 			fmt.Fprintf(os.Stdout, "\r\n[detached from %s]\r\n", name)
@@ -123,7 +141,7 @@ func cmdAttach() {
 			}
 			return
 		}
-		fmt.Fprintf(os.Stderr, "Attach error: %v\n", err)
+		fmt.Fprintln(os.Stderr, formatSessionActionError("attach", name, err))
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stdout, "\r\n[detached from %s]\r\n", name)
@@ -149,7 +167,7 @@ func cmdToggle() {
 			}
 			return
 		}
-		fmt.Fprintf(os.Stderr, "Attach error: %v\n", err)
+		fmt.Fprintln(os.Stderr, formatSessionActionError("attach", target, err))
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stdout, "\r\n[detached from %s]\r\n", target)
@@ -214,6 +232,12 @@ func runAttachTarget(name string) error {
 
 	cmd := exec.Command(exe, "attach", name)
 	cmd.Env = os.Environ()
+	if os.Getenv("TSM_TEST_ATTACH_STDIO") == "1" {
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	}
 
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err == nil {
@@ -234,13 +258,15 @@ func attachSession(cfg session.Config, name string, createIfMissing bool) error 
 	path := cfg.SocketPath(name)
 	if createIfMissing {
 		if _, err := os.Lstat(path); err == nil && !session.IsSocket(path) {
-			return fmt.Errorf("session path %q exists and is not a socket", path)
+			return fmt.Errorf("%w: %q", errSessionPathNotSocket, path)
 		}
 		if !session.IsSocket(path) {
 			if err := session.SpawnDaemon(name, nil); err != nil {
 				return fmt.Errorf("create session %q: %w", name, err)
 			}
 		}
+	} else if !session.IsSocket(path) {
+		return fmt.Errorf("%w: %q", session.ErrSessionNotFound, name)
 	}
 	if err := markSessionFocused(cfg, name, os.Getenv("TSM_SESSION")); err != nil {
 		return fmt.Errorf("record focus: %w", err)
@@ -333,7 +359,7 @@ func cmdDetach() {
 	}
 
 	if err := session.DetachSession(cfg, name); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintln(os.Stderr, formatSessionActionError("detach", name, err))
 		os.Exit(1)
 	}
 	fmt.Printf("Session %q detached\n", name)
@@ -372,6 +398,59 @@ func cmdList() {
 	w.Flush()
 }
 
+func cmdDoctor() {
+	if len(os.Args) >= 3 {
+		switch os.Args[2] {
+		case "clean-stale":
+			cmdDoctorCleanStale()
+			return
+		default:
+			fmt.Fprintf(os.Stderr, "tsm doctor: unknown subcommand %q\n", os.Args[2])
+			printDoctorUsage()
+			os.Exit(1)
+		}
+	}
+
+	report, err := doctorReport(os.Getenv)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Doctor error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Print(report)
+}
+
+func cmdDoctorCleanStale() {
+	removed, err := cleanStaleSockets(session.DefaultConfig())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Doctor clean-stale error: %v\n", err)
+		os.Exit(1)
+	}
+	if len(removed) == 0 {
+		fmt.Println("No stale sockets found")
+		return
+	}
+	for _, name := range removed {
+		fmt.Printf("Removed stale socket %q\n", name)
+	}
+}
+
+func cmdDebug() {
+	if len(os.Args) < 4 || os.Args[2] != "session" {
+		printDebugUsage()
+		os.Exit(1)
+	}
+
+	report, healthy, err := debugSessionReport(session.DefaultConfig(), os.Args[3])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Debug error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Print(report)
+	if !healthy {
+		os.Exit(1)
+	}
+}
+
 func cmdRename() {
 	if len(os.Args) < 4 {
 		fmt.Fprintln(os.Stderr, "usage: tsm rename <old> <new>")
@@ -382,7 +461,7 @@ func cmdRename() {
 	cfg := session.DefaultConfig()
 
 	if err := session.RenameSession(cfg, oldName, newName); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintln(os.Stderr, formatSessionActionError("rename", oldName, err))
 		os.Exit(1)
 	}
 	fmt.Printf("Session %q renamed to %q\n", oldName, newName)
@@ -400,7 +479,7 @@ func cmdKill() {
 	var failed bool
 	for _, name := range targets {
 		if err := session.KillSession(cfg, name); err != nil {
-			fmt.Fprintf(os.Stderr, "Error killing %q: %v\n", name, err)
+			fmt.Fprintln(os.Stderr, formatSessionActionError("kill", name, err))
 			failed = true
 			continue
 		}
@@ -535,6 +614,227 @@ func launchTUI(opts tui.Options) {
 	}
 }
 
+func runCommand(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	return cmd.Run()
+}
+
+func doctorReport(getenv func(string) string) (string, error) {
+	var b strings.Builder
+
+	cfg := session.DefaultConfig()
+	configState := "unavailable"
+	configPath := ""
+	if loadedCfg, err := appconfig.Load(getenv); err == nil {
+		configPath = loadedCfg.Path
+		if _, err := os.Stat(configPath); err == nil {
+			configState = "present"
+		} else if os.IsNotExist(err) {
+			configState = "missing"
+		} else {
+			configState = err.Error()
+		}
+	} else {
+		configState = "error: " + err.Error()
+	}
+
+	exePath, exeErr := doctorExecutable()
+	pkgConfigPath, pkgConfigErr := doctorLookPath("pkg-config")
+	ghosttyStatus := doctorGhosttyStatus(session.RestoreBackendName(), pkgConfigErr)
+
+	fmt.Fprintf(&b, "tsm doctor\n")
+	fmt.Fprintf(&b, "version: %s\n", versionString(session.RestoreBackendName()))
+	if exeErr != nil {
+		fmt.Fprintf(&b, "executable: error: %v\n", exeErr)
+	} else {
+		fmt.Fprintf(&b, "executable: %s\n", exePath)
+	}
+	if configPath == "" {
+		configPath = "<unknown>"
+	}
+	fmt.Fprintf(&b, "config: %s (%s)\n", configPath, configState)
+	fmt.Fprintf(&b, "socket dir: %s\n", cfg.SocketDir)
+	if pkgConfigErr != nil {
+		fmt.Fprintf(&b, "pkg-config: missing (%v)\n", pkgConfigErr)
+	} else {
+		fmt.Fprintf(&b, "pkg-config: %s\n", pkgConfigPath)
+	}
+	fmt.Fprintf(&b, "libghostty-vt: %s\n", ghosttyStatus)
+
+	socketStatuses, err := doctorSocketStatuses(cfg)
+	if err != nil {
+		return "", err
+	}
+
+	fmt.Fprintf(&b, "sessions:\n")
+	if len(socketStatuses) == 0 {
+		fmt.Fprintf(&b, "  none\n")
+		return b.String(), nil
+	}
+	for _, status := range socketStatuses {
+		if status.Err != "" {
+			fmt.Fprintf(&b, "  - %s: stale (%s)\n", status.Name, status.Err)
+			continue
+		}
+		fmt.Fprintf(
+			&b,
+			"  - %s: live pid=%d clients=%d cmd=%q dir=%q\n",
+			status.Name,
+			status.Info.PID,
+			status.Info.ClientsLen,
+			status.Info.CmdString(),
+			status.Info.CwdString(),
+		)
+	}
+
+	return b.String(), nil
+}
+
+type doctorSocketStatus struct {
+	Name string
+	Info *session.InfoPayload
+	Err  string
+}
+
+func doctorSocketStatuses(cfg session.Config) ([]doctorSocketStatus, error) {
+	entries, err := doctorReadDir(cfg.SocketDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	statuses := make([]doctorSocketStatus, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		path := cfg.SocketPath(name)
+		if !doctorIsSocket(path) {
+			continue
+		}
+		info, err := doctorProbe(path)
+		if err != nil {
+			statuses = append(statuses, doctorSocketStatus{
+				Name: name,
+				Err:  err.Error(),
+			})
+			continue
+		}
+		statuses = append(statuses, doctorSocketStatus{
+			Name: name,
+			Info: info,
+		})
+	}
+
+	return statuses, nil
+}
+
+func cleanStaleSockets(cfg session.Config) ([]string, error) {
+	statuses, err := doctorSocketStatuses(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	var removed []string
+	for _, status := range statuses {
+		if status.Err == "" {
+			continue
+		}
+		path := cfg.SocketPath(status.Name)
+		if err := doctorCleanSocket(path); err != nil && !os.IsNotExist(err) {
+			return removed, err
+		}
+		removed = append(removed, status.Name)
+	}
+
+	return removed, nil
+}
+
+func detectGhosttyStatus(backend string, pkgConfigErr error) string {
+	if pkgConfigErr != nil {
+		if backend == "libghostty-vt" {
+			return "loaded (pkg-config not found)"
+		}
+		return "pkg-config not found"
+	}
+	if doctorRunCommand("pkg-config", "--exists", "libghostty-vt") == nil {
+		return "ok"
+	}
+	if backend == "libghostty-vt" {
+		return "loaded (pkg-config not configured)"
+	}
+	return "missing"
+}
+
+func formatSessionActionError(action, name string, err error) string {
+	switch {
+	case errors.Is(err, session.ErrSessionNotFound), errors.Is(err, os.ErrNotExist):
+		return fmt.Sprintf("Cannot %s session %q: session not found.\nRun 'tsm ls' to list sessions.", action, name)
+	case errors.Is(err, errSessionPathNotSocket):
+		return fmt.Sprintf("Cannot %s session %q: the session path is not a Unix socket.\nRun 'tsm doctor' to inspect the socket directory.", action, name)
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return fmt.Sprintf("Cannot %s session %q: the session socket exists but the daemon is not responding.\nRun 'tsm doctor clean-stale' to remove stale sockets, then recreate or reattach the session.", action, name)
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return fmt.Sprintf("Cannot %s session %q: the daemon timed out.\nRun 'tsm debug session %s' for details, or 'tsm doctor' for a broader health check.", action, name, name)
+	}
+
+	return fmt.Sprintf("Cannot %s session %q: %v\nRun 'tsm debug session %s' for details, or 'tsm doctor' for a broader health check.", action, name, err, name)
+}
+
+func debugSessionReport(cfg session.Config, name string) (string, bool, error) {
+	var b strings.Builder
+	path := cfg.SocketPath(name)
+
+	fmt.Fprintf(&b, "tsm debug session %s\n", name)
+	fmt.Fprintf(&b, "socket: %s\n", path)
+
+	if _, err := os.Lstat(path); err != nil {
+		if os.IsNotExist(err) {
+			fmt.Fprintf(&b, "state: missing\n")
+			return b.String(), false, nil
+		}
+		return "", false, err
+	}
+	if !doctorIsSocket(path) {
+		fmt.Fprintf(&b, "state: invalid (path exists but is not a socket)\n")
+		return b.String(), false, nil
+	}
+
+	info, err := doctorProbe(path)
+	if err != nil {
+		fmt.Fprintf(&b, "state: stale\n")
+		fmt.Fprintf(&b, "error: %v\n", err)
+		return b.String(), false, nil
+	}
+
+	fmt.Fprintf(&b, "state: live\n")
+	fmt.Fprintf(&b, "pid: %d\n", info.PID)
+	fmt.Fprintf(&b, "clients: %d\n", info.ClientsLen)
+	fmt.Fprintf(&b, "command: %s\n", info.CmdString())
+	fmt.Fprintf(&b, "cwd: %s\n", info.CwdString())
+	if info.CreatedAt != 0 {
+		fmt.Fprintf(&b, "created: %s\n", time.Unix(int64(info.CreatedAt), 0).Format(time.RFC3339))
+	}
+	if info.TaskEndedAt != 0 {
+		fmt.Fprintf(&b, "task ended: %s\n", time.Unix(int64(info.TaskEndedAt), 0).Format(time.RFC3339))
+		fmt.Fprintf(&b, "task exit code: %d\n", info.TaskExitCode)
+	}
+
+	preview := strings.TrimSpace(debugFetchPreview(name, 12))
+	if preview == "" {
+		preview = "(empty)"
+	}
+	fmt.Fprintf(&b, "preview:\n%s\n", preview)
+
+	return b.String(), true, nil
+}
+
 func printUsage() {
 	fmt.Print(`tsm — terminal session manager
 
@@ -549,6 +849,9 @@ Usage:
   tsm detach [name]        Detach current or named session
   tsm new <name> [cmd...]  Create a new session
   tsm list                 List active sessions
+  tsm doctor               Show runtime diagnostics
+  tsm doctor clean-stale   Remove stale session sockets
+  tsm debug session <name> Show detailed diagnostics for one session
   tsm rename <old> <new>   Rename a session
   tsm kill [name...]       Kill current or named sessions
   tsm version              Show version
@@ -571,6 +874,23 @@ func printConfigUsage() {
 
 Usage:
   tsm config install [--force]
+`)
+}
+
+func printDoctorUsage() {
+	fmt.Print(`tsm doctor
+
+Usage:
+  tsm doctor
+  tsm doctor clean-stale
+`)
+}
+
+func printDebugUsage() {
+	fmt.Print(`tsm debug
+
+Usage:
+  tsm debug session <name>
 `)
 }
 

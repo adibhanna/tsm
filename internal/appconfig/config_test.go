@@ -118,6 +118,66 @@ func TestLoadMissingConfigReturnsDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsInvalidTUIMode(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(configPath, []byte("[tui]\nmode = \"weird\"\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(func(key string) string {
+		if key == DefaultConfigPathEnv {
+			return configPath
+		}
+		return ""
+	})
+	if err == nil || !strings.Contains(err.Error(), `unknown TUI mode "weird"`) {
+		t.Fatalf("Load() error = %v, want invalid mode error", err)
+	}
+}
+
+func TestLoadRejectsInvalidShellShortcut(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	content := "[shell.shortcuts]\npalette = \"cmd+p\"\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(func(key string) string {
+		if key == DefaultConfigPathEnv {
+			return configPath
+		}
+		return ""
+	})
+	if err == nil || !strings.Contains(err.Error(), `shell.shortcuts.palette: unsupported shortcut "cmd+p"`) {
+		t.Fatalf("Load() error = %v, want invalid shortcut error", err)
+	}
+}
+
+func TestLoadRejectsConflictingShellShortcuts(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	content := `
+[shell.shortcuts]
+palette = "ctrl+]"
+toggle = "ctrl+]"
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(func(key string) string {
+		if key == DefaultConfigPathEnv {
+			return configPath
+		}
+		return ""
+	})
+	if err == nil || !strings.Contains(err.Error(), `shell.shortcuts.toggle conflicts with shell.shortcuts.palette`) {
+		t.Fatalf("Load() error = %v, want conflicting shortcut error", err)
+	}
+}
+
 func TestInstallDefaultWritesTemplate(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tsm.toml")

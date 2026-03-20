@@ -34,32 +34,25 @@ What shipped:
 - `CONTRIBUTING.md` with prerequisites, setup flow, and pinned versions table
 - README updated with explicit build prerequisites
 
-### 2. End-to-End Integration Tests
+### ~~2. End-to-End Integration Tests~~ Done
 
-Problem:
+- [x] add attach/detach smoke tests
+- [x] add rename and local-switch tests
+- [x] add kill/detach cleanup tests
+- [x] add resize and restore-order tests
+- [x] add at least one full-screen app smoke test path
 
-- most of the risk in `tsm` is in PTY lifecycle behavior, not isolated helper logic
-- unit tests exist, but the critical flows are attach/detach/rename/kill/switch/full-screen restore
+What shipped:
 
-Why it matters:
+- daemon/session integration coverage in [internal/session/integration_test.go](/Users/adibhanna/Developer/opensource/tsm/internal/session/integration_test.go)
+- CLI/client integration coverage in [cli_integration_test.go](/Users/adibhanna/Developer/opensource/tsm/cli_integration_test.go)
+- real attach → detach → reattach coverage through the client path
+- local switch coverage
+- terminal cleanup coverage after kill
+- TUI and palette attach handoff coverage
+- daemon-side rename, resize, multi-client detach, and full-screen restore smoke coverage
 
-- these are the features users will trust or distrust immediately
-- regressions here are expensive and easy to miss without realistic tests
-
-Track:
-
-- [ ] add attach/detach smoke tests
-- [ ] add rename and local-switch tests
-- [ ] add kill/detach cleanup tests
-- [ ] add resize and restore-order tests
-- [ ] add at least one full-screen app smoke test path
-
-Relevant areas:
-
-- [internal/session](/Users/adibhanna/Developer/opensource/tsm/internal/session)
-- [main.go](/Users/adibhanna/Developer/opensource/tsm/main.go)
-
-### 3. Better Diagnostics and Recovery Tooling
+### ~~3. Better Diagnostics and Recovery Tooling~~ Done
 
 Problem:
 
@@ -72,10 +65,18 @@ Why it matters:
 
 Track:
 
-- [ ] add `tsm doctor`
-- [ ] add `tsm debug session <name>`
-- [ ] improve runtime and daemon error messages
-- [ ] add stale-session and stale-socket repair guidance
+- [x] add `tsm doctor`
+- [x] add `tsm debug session <name>`
+- [x] improve runtime and daemon error messages
+- [x] add stale-session and stale-socket repair guidance
+
+What shipped:
+
+- `tsm doctor` for runtime/backend/config/socket diagnostics
+- `tsm doctor clean-stale` for stale socket cleanup
+- `tsm debug session <name>` for per-session inspection, including state, pid, clients, cwd/cmd, exit metadata, and preview output
+- attach/kill/detach/rename failures now point users at `tsm ls`, `tsm doctor`, `tsm doctor clean-stale`, or `tsm debug session <name>` instead of exposing raw socket errors alone
+- README and CLI docs now include stale-socket cleanup and per-session debug guidance
 
 Relevant areas:
 
@@ -85,7 +86,7 @@ Relevant areas:
 
 ## P1
 
-### 4. Harden Config and Keybinding Validation
+### ~~4. Harden Config and Keybinding Validation~~ Done
 
 Problem:
 
@@ -98,10 +99,17 @@ Why it matters:
 
 Track:
 
-- [ ] validate config values more strictly
-- [ ] detect key conflicts and ambiguous bindings
-- [ ] produce clearer startup/config parse errors
-- [ ] reject invalid shell shortcut formats with actionable messages
+- [x] validate config values more strictly
+- [x] detect key conflicts and ambiguous bindings
+- [x] produce clearer startup/config parse errors
+- [x] reject invalid shell shortcut formats with actionable messages
+
+What shipped:
+
+- config load now rejects unknown TUI mode/keymap values
+- shell shortcut config now rejects unsupported formats and duplicate shell shortcuts
+- TUI keymap overrides now reject conflicting bindings instead of silently shadowing actions
+- config validation errors now include the config path plus field-specific failure details
 
 Relevant files:
 

@@ -206,7 +206,40 @@ func BuildBindings(keymap Keymap, overrides map[string][]string) (Bindings, erro
 		}
 		bindings[action] = parsed
 	}
+	if err := validateBindingConflicts(bindings); err != nil {
+		return nil, err
+	}
 	return bindings, nil
+}
+
+func validateBindingConflicts(bindings Bindings) error {
+	owners := map[string]Action{}
+	for _, action := range allActions {
+		for _, binding := range bindings[action] {
+			key := bindingConflictKey(binding)
+			if prev, ok := owners[key]; ok && prev != action {
+				return fmt.Errorf("binding %q conflicts between %s and %s", binding.Display, prev, action)
+			}
+			owners[key] = action
+		}
+	}
+	return nil
+}
+
+func bindingConflictKey(binding KeyBinding) string {
+	if binding.Stroke != "" {
+		return binding.Stroke
+	}
+	var b strings.Builder
+	if binding.Ctrl {
+		b.WriteString("ctrl+")
+	}
+	if binding.Text != "" {
+		b.WriteString(binding.Text)
+		return b.String()
+	}
+	b.WriteRune(binding.Code)
+	return b.String()
 }
 
 func ParseAction(raw string) (Action, error) {

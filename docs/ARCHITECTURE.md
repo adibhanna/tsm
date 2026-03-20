@@ -90,6 +90,8 @@ Sessions continue running after detach. Killing a client does not kill the sessi
 3. environment
 4. CLI flags
 
+It also owns user-facing diagnostics like `tsm doctor`, which reports runtime config, backend availability, and live vs stale session sockets.
+
 ## IPC Protocol
 
 All daemon communication uses a simple framed message format:

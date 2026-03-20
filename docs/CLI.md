@@ -11,6 +11,9 @@ tsm attach [name]
 tsm detach [name]
 tsm new <name> [cmd...]
 tsm list
+tsm doctor
+tsm doctor clean-stale
+tsm debug session <name>
 tsm rename <old> <new>
 tsm kill [name...]
 tsm version
@@ -113,6 +116,12 @@ List sessions:
 tsm ls
 ```
 
+Run diagnostics:
+
+```bash
+tsm doctor
+```
+
 Rename a session:
 
 ```bash
@@ -120,6 +129,35 @@ tsm rename old-name new-name
 ```
 
 Renaming updates the daemon-side session name state, so prompt integration and picker metadata stay in sync for fresh sessions.
+
+## Diagnostics
+
+`tsm doctor` prints a quick environment and runtime report.
+
+It includes:
+
+- binary version and active backend
+- config path status
+- socket directory
+- `pkg-config` / `libghostty-vt` availability
+- live and stale session sockets
+
+If stale sockets are reported, remove them with:
+
+```bash
+tsm doctor clean-stale
+```
+
+`tsm debug session <name>` prints a deeper report for one session.
+
+It includes:
+
+- socket path
+- live / stale / missing state
+- daemon PID and attached-client count
+- command and cwd
+- task end state when available
+- a short current preview snapshot
 
 ## TUI Entry Points
 

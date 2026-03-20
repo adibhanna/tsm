@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+var ErrSessionNotFound = errors.New("session not found")
+
 // Session represents a running session, compatible with the TUI's Session type.
 type Session struct {
 	Name           string
@@ -104,7 +106,7 @@ func ListSessions(cfg Config) ([]Session, error) {
 func RenameSession(cfg Config, oldName, newName string) error {
 	oldPath := cfg.SocketPath(oldName)
 	if !IsSocket(oldPath) {
-		return fmt.Errorf("session %q not found", oldName)
+		return fmt.Errorf("%w: %q", ErrSessionNotFound, oldName)
 	}
 
 	conn, err := Connect(oldPath)
@@ -132,6 +134,9 @@ func RenameSession(cfg Config, oldName, newName string) error {
 // KillSession sends a kill message to the named session.
 func KillSession(cfg Config, name string) error {
 	path := cfg.SocketPath(name)
+	if !IsSocket(path) {
+		return fmt.Errorf("%w: %q", ErrSessionNotFound, name)
+	}
 	conn, err := Connect(path)
 	if err != nil {
 		return err
@@ -144,6 +149,9 @@ func KillSession(cfg Config, name string) error {
 // without killing the daemon or shell process.
 func DetachSession(cfg Config, name string) error {
 	path := cfg.SocketPath(name)
+	if !IsSocket(path) {
+		return fmt.Errorf("%w: %q", ErrSessionNotFound, name)
+	}
 	conn, err := Connect(path)
 	if err != nil {
 		return err

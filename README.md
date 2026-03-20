@@ -185,6 +185,12 @@ List sessions:
 tsm ls
 ```
 
+Run diagnostics:
+
+```bash
+tsm doctor
+```
+
 ## Session Model
 
 Each session is a long-lived daemon with:
@@ -210,6 +216,9 @@ tsm attach [name]
 tsm detach [name]
 tsm new <name> [cmd...]
 tsm ls
+tsm doctor
+tsm doctor clean-stale
+tsm debug session <name>
 tsm rename <old> <new>
 tsm kill [name...]
 tsm version
@@ -262,6 +271,35 @@ tsm detach work
 tsm kill
 tsm kill api worker repl
 ```
+
+### Diagnostics
+
+Use `tsm doctor` when install, runtime-linking, or socket issues are unclear.
+
+It reports:
+
+- current binary/version/backend
+- config path state
+- socket directory
+- `pkg-config` and `libghostty-vt` availability
+- live versus stale session sockets
+
+If `tsm doctor` reports stale sockets, clean them up with:
+
+```bash
+tsm doctor clean-stale
+```
+
+Use `tsm debug session <name>` when one specific session is acting strangely.
+
+It reports:
+
+- socket path
+- live / stale / missing state
+- daemon PID and client count
+- command and cwd
+- task end status when available
+- a short current preview snapshot
 
 ## TUI Workflow
 

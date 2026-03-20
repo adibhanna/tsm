@@ -2,9 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -224,7 +228,13 @@ func TestSaveFocusStateWritesJSON(t *testing.T) {
 }
 
 func TestResolveTUIOptionsSimplifiedFlag(t *testing.T) {
-	opts, err := resolveTUIOptions([]string{"--simplified"}, func(string) string { return "" })
+	configPath := filepath.Join(t.TempDir(), "missing.toml")
+	opts, err := resolveTUIOptions([]string{"--simplified"}, func(key string) string {
+		if key == appconfig.DefaultConfigPathEnv {
+			return configPath
+		}
+		return ""
+	})
 	if err != nil {
 		t.Fatalf("resolveTUIOptions: %v", err)
 	}
@@ -237,8 +247,11 @@ func TestResolveTUIOptionsSimplifiedFlag(t *testing.T) {
 }
 
 func TestResolveTUIOptionsUsesGlobalEnv(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "missing.toml")
 	env := func(key string) string {
 		switch key {
+		case appconfig.DefaultConfigPathEnv:
+			return configPath
 		case "TSM_TUI_MODE":
 			return "simplified"
 		case "TSM_TUI_KEYMAP":
@@ -286,8 +299,11 @@ func TestResolveTUIOptionsUsesConfigDefaults(t *testing.T) {
 }
 
 func TestResolveTUIOptionsExplicitKeymapOverridesEnv(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "missing.toml")
 	env := func(key string) string {
 		switch key {
+		case appconfig.DefaultConfigPathEnv:
+			return configPath
 		case "TSM_TUI_MODE":
 			return "full"
 		case "TSM_TUI_KEYMAP":
@@ -359,6 +375,25 @@ func TestResolveTUIOptionsCLIKeymapSelectsMatchingConfigOverrides(t *testing.T) 
 	}
 }
 
+func TestResolveTUIOptionsRejectsBindingConflicts(t *testing.T) {
+	cfg := appconfig.Config{
+		TUI: appconfig.TUIConfig{
+			Keymaps: map[string]map[string][]string{
+				"default": {
+					"attach": []string{"enter"},
+					"detach": []string{"enter"},
+				},
+				"palette": {},
+			},
+		},
+	}
+
+	_, err := resolveTUIOptionsWithConfig(nil, func(string) string { return "" }, cfg)
+	if err == nil || !strings.Contains(err.Error(), `binding "enter" conflicts between attach and detach`) {
+		t.Fatalf("resolveTUIOptionsWithConfig() error = %v, want binding conflict error", err)
+	}
+}
+
 func TestVersionStringForDevBuild(t *testing.T) {
 	prevVersion, prevCommit, prevDate, prevDirty := version, commit, date, dirty
 	t.Cleanup(func() {
@@ -394,3 +429,309 @@ func TestVersionStringForReleaseBuild(t *testing.T) {
 		t.Fatalf("versionString() = %q, want %q", got, want)
 	}
 }
+
+func TestFormatSessionActionErrorNotFound(t *testing.T) {
+	msg := formatSessionActionError("attach", "demo", fmt.Errorf("%w: %q", session.ErrSessionNotFound, "demo"))
+	if !strings.Contains(msg, `Cannot attach session "demo": session not found.`) {
+		t.Fatalf("message missing not-found summary: %q", msg)
+	}
+	if !strings.Contains(msg, "Run 'tsm ls' to list sessions.") {
+		t.Fatalf("message missing next step: %q", msg)
+	}
+}
+
+func TestFormatSessionActionErrorConnectionRefused(t *testing.T) {
+	msg := formatSessionActionError("kill", "demo", &net.OpError{Err: syscall.ECONNREFUSED})
+	if !strings.Contains(msg, `Cannot kill session "demo": the session socket exists but the daemon is not responding.`) {
+		t.Fatalf("message missing stale summary: %q", msg)
+	}
+	if !strings.Contains(msg, "tsm doctor clean-stale") {
+		t.Fatalf("message missing clean-stale guidance: %q", msg)
+	}
+}
+
+func TestFormatSessionActionErrorTimeout(t *testing.T) {
+	msg := formatSessionActionError("detach", "demo", timeoutError{})
+	if !strings.Contains(msg, `Cannot detach session "demo": the daemon timed out.`) {
+		t.Fatalf("message missing timeout summary: %q", msg)
+	}
+	if !strings.Contains(msg, "tsm debug session demo") {
+		t.Fatalf("message missing debug guidance: %q", msg)
+	}
+}
+
+func TestDoctorReportNoSessions(t *testing.T) {
+	socketDir := t.TempDir()
+	configHome := t.TempDir()
+	t.Setenv("TSM_DIR", socketDir)
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+
+	restoreDoctorFns := stubDoctorFns()
+	defer restoreDoctorFns()
+	doctorExecutable = func() (string, error) { return "/tmp/tsm", nil }
+	doctorLookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
+	doctorGhosttyStatus = func(backend string, pkgConfigErr error) string { return "ok" }
+
+	report, err := doctorReport(os.Getenv)
+	if err != nil {
+		t.Fatalf("doctorReport: %v", err)
+	}
+
+	if !strings.Contains(report, "tsm doctor\n") {
+		t.Fatalf("report missing header: %q", report)
+	}
+	if !strings.Contains(report, "libghostty-vt: ok") {
+		t.Fatalf("report missing ghostty status: %q", report)
+	}
+	if !strings.Contains(report, "sessions:\n  none") {
+		t.Fatalf("report missing empty sessions section: %q", report)
+	}
+	if !strings.Contains(report, filepath.Join(configHome, "tsm", "config.toml")+" (missing)") {
+		t.Fatalf("report missing config path/state: %q", report)
+	}
+}
+
+func TestDoctorReportLiveAndStaleSockets(t *testing.T) {
+	socketDir := t.TempDir()
+	configHome := t.TempDir()
+	t.Setenv("TSM_DIR", socketDir)
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+
+	for _, name := range []string{"live", "stale"} {
+		if err := os.WriteFile(filepath.Join(socketDir, name), nil, 0o600); err != nil {
+			t.Fatalf("write fake socket %s: %v", name, err)
+		}
+	}
+
+	restoreDoctorFns := stubDoctorFns()
+	defer restoreDoctorFns()
+	doctorExecutable = func() (string, error) { return "/tmp/tsm", nil }
+	doctorLookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
+	doctorGhosttyStatus = func(backend string, pkgConfigErr error) string { return "ok" }
+	doctorIsSocket = func(path string) bool { return true }
+	doctorProbe = func(path string) (*session.InfoPayload, error) {
+		if strings.HasSuffix(path, "/live") {
+			info := &session.InfoPayload{
+				ClientsLen: 2,
+				PID:        1234,
+				CmdLen:     4,
+				CwdLen:     5,
+			}
+			copy(info.Cmd[:], "zsh ")
+			copy(info.Cwd[:], "/repo")
+			return info, nil
+		}
+		return nil, errors.New("connect: connection refused")
+	}
+
+	report, err := doctorReport(os.Getenv)
+	if err != nil {
+		t.Fatalf("doctorReport: %v", err)
+	}
+
+	if !strings.Contains(report, `- live: live pid=1234 clients=2 cmd="zsh " dir="/repo"`) {
+		t.Fatalf("report missing live session details: %q", report)
+	}
+	if !strings.Contains(report, `- stale: stale (connect: connection refused)`) {
+		t.Fatalf("report missing stale session details: %q", report)
+	}
+}
+
+func TestDoctorReportMissingPkgConfig(t *testing.T) {
+	socketDir := t.TempDir()
+	t.Setenv("TSM_DIR", socketDir)
+
+	restoreDoctorFns := stubDoctorFns()
+	defer restoreDoctorFns()
+	doctorExecutable = func() (string, error) { return "/tmp/tsm", nil }
+	doctorLookPath = func(file string) (string, error) { return "", errors.New("not found") }
+	doctorGhosttyStatus = detectGhosttyStatus
+
+	report, err := doctorReport(os.Getenv)
+	if err != nil {
+		t.Fatalf("doctorReport: %v", err)
+	}
+	if !strings.Contains(report, "pkg-config: missing") {
+		t.Fatalf("report missing pkg-config error: %q", report)
+	}
+	if !strings.Contains(report, "libghostty-vt: loaded (pkg-config not found)") {
+		t.Fatalf("report missing libghostty-vt fallback status: %q", report)
+	}
+}
+
+func TestDetectGhosttyStatusLoadedWithoutPkgConfig(t *testing.T) {
+	restoreDoctorFns := stubDoctorFns()
+	defer restoreDoctorFns()
+	doctorRunCommand = func(name string, args ...string) error { return errors.New("missing") }
+
+	if got := detectGhosttyStatus("libghostty-vt", errors.New("not found")); got != "loaded (pkg-config not found)" {
+		t.Fatalf("detectGhosttyStatus() = %q", got)
+	}
+	if got := detectGhosttyStatus("libghostty-vt", nil); got != "loaded (pkg-config not configured)" {
+		t.Fatalf("detectGhosttyStatus() = %q", got)
+	}
+	if got := detectGhosttyStatus("other", nil); got != "missing" {
+		t.Fatalf("detectGhosttyStatus() = %q", got)
+	}
+}
+
+func TestDebugSessionReportLive(t *testing.T) {
+	socketDir := t.TempDir()
+	cfg := session.Config{SocketDir: socketDir}
+	path := cfg.SocketPath("demo")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatalf("write fake socket: %v", err)
+	}
+
+	restoreDoctorFns := stubDoctorFns()
+	defer restoreDoctorFns()
+	doctorIsSocket = func(got string) bool { return got == path }
+	doctorProbe = func(got string) (*session.InfoPayload, error) {
+		info := &session.InfoPayload{
+			ClientsLen:   1,
+			PID:          4242,
+			CmdLen:       4,
+			CwdLen:       5,
+			CreatedAt:    1700000000,
+			TaskEndedAt:  1700000100,
+			TaskExitCode: 7,
+		}
+		copy(info.Cmd[:], "zsh ")
+		copy(info.Cwd[:], "/repo")
+		return info, nil
+	}
+	debugFetchPreview = func(name string, lines int) string {
+		if name != "demo" || lines != 12 {
+			t.Fatalf("unexpected preview request: %s %d", name, lines)
+		}
+		return "hello\nworld"
+	}
+
+	report, healthy, err := debugSessionReport(cfg, "demo")
+	if err != nil {
+		t.Fatalf("debugSessionReport: %v", err)
+	}
+	if !healthy {
+		t.Fatalf("expected healthy live session report: %q", report)
+	}
+	if !strings.Contains(report, "state: live") {
+		t.Fatalf("report missing live state: %q", report)
+	}
+	if !strings.Contains(report, "pid: 4242") || !strings.Contains(report, "clients: 1") {
+		t.Fatalf("report missing process details: %q", report)
+	}
+	if !strings.Contains(report, "preview:\nhello\nworld\n") {
+		t.Fatalf("report missing preview: %q", report)
+	}
+}
+
+func TestDebugSessionReportMissing(t *testing.T) {
+	cfg := session.Config{SocketDir: t.TempDir()}
+
+	report, healthy, err := debugSessionReport(cfg, "missing")
+	if err != nil {
+		t.Fatalf("debugSessionReport: %v", err)
+	}
+	if healthy {
+		t.Fatalf("expected missing session to be unhealthy: %q", report)
+	}
+	if !strings.Contains(report, "state: missing") {
+		t.Fatalf("report missing missing-state: %q", report)
+	}
+}
+
+func TestDebugSessionReportStale(t *testing.T) {
+	socketDir := t.TempDir()
+	cfg := session.Config{SocketDir: socketDir}
+	path := cfg.SocketPath("stale")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatalf("write fake socket: %v", err)
+	}
+
+	restoreDoctorFns := stubDoctorFns()
+	defer restoreDoctorFns()
+	doctorIsSocket = func(got string) bool { return got == path }
+	doctorProbe = func(string) (*session.InfoPayload, error) {
+		return nil, errors.New("connect: connection refused")
+	}
+
+	report, healthy, err := debugSessionReport(cfg, "stale")
+	if err != nil {
+		t.Fatalf("debugSessionReport: %v", err)
+	}
+	if healthy {
+		t.Fatalf("expected stale session to be unhealthy: %q", report)
+	}
+	if !strings.Contains(report, "state: stale") || !strings.Contains(report, "connection refused") {
+		t.Fatalf("report missing stale details: %q", report)
+	}
+}
+
+func TestCleanStaleSocketsRemovesOnlyStaleEntries(t *testing.T) {
+	socketDir := t.TempDir()
+	cfg := session.Config{SocketDir: socketDir}
+
+	restoreDoctorFns := stubDoctorFns()
+	defer restoreDoctorFns()
+	doctorReadDir = func(string) ([]os.DirEntry, error) {
+		for _, name := range []string{"live", "stale"} {
+			if err := os.WriteFile(filepath.Join(socketDir, name), nil, 0o600); err != nil {
+				t.Fatalf("write fake socket %s: %v", name, err)
+			}
+		}
+		return os.ReadDir(socketDir)
+	}
+	doctorIsSocket = func(path string) bool { return true }
+	doctorProbe = func(path string) (*session.InfoPayload, error) {
+		if strings.HasSuffix(path, "/live") {
+			return &session.InfoPayload{}, nil
+		}
+		return nil, errors.New("connection refused")
+	}
+	var removedPaths []string
+	doctorCleanSocket = func(path string) error {
+		removedPaths = append(removedPaths, path)
+		return nil
+	}
+
+	removed, err := cleanStaleSockets(cfg)
+	if err != nil {
+		t.Fatalf("cleanStaleSockets: %v", err)
+	}
+	if len(removed) != 1 || removed[0] != "stale" {
+		t.Fatalf("removed = %#v, want [stale]", removed)
+	}
+	if len(removedPaths) != 1 || removedPaths[0] != cfg.SocketPath("stale") {
+		t.Fatalf("removedPaths = %#v, want stale socket path", removedPaths)
+	}
+}
+
+func stubDoctorFns() func() {
+	prevExecutable := doctorExecutable
+	prevLookPath := doctorLookPath
+	prevRunCommand := doctorRunCommand
+	prevReadDir := doctorReadDir
+	prevProbe := doctorProbe
+	prevIsSocket := doctorIsSocket
+	prevGhosttyStatus := doctorGhosttyStatus
+	prevCleanSocket := doctorCleanSocket
+	prevFetchPreview := debugFetchPreview
+
+	return func() {
+		doctorExecutable = prevExecutable
+		doctorLookPath = prevLookPath
+		doctorRunCommand = prevRunCommand
+		doctorReadDir = prevReadDir
+		doctorProbe = prevProbe
+		doctorIsSocket = prevIsSocket
+		doctorGhosttyStatus = prevGhosttyStatus
+		doctorCleanSocket = prevCleanSocket
+		debugFetchPreview = prevFetchPreview
+	}
+}
+
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "timeout" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }

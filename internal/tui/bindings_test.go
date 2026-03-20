@@ -33,6 +33,19 @@ func TestBuildBindingsSupportsAliases(t *testing.T) {
 	}
 }
 
+func TestBuildBindingsRejectsConflicts(t *testing.T) {
+	_, err := BuildBindings(KeymapDefault, map[string][]string{
+		"attach": []string{"enter"},
+		"detach": []string{"enter"},
+	})
+	if err == nil {
+		t.Fatal("BuildBindings() error = nil, want conflict error")
+	}
+	if got := err.Error(); got != `binding "enter" conflicts between attach and detach` {
+		t.Fatalf("BuildBindings() error = %q", got)
+	}
+}
+
 func TestParseBindingFormatsLabels(t *testing.T) {
 	tests := []struct {
 		raw  string
