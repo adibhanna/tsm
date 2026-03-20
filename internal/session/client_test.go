@@ -31,4 +31,16 @@ func TestTermResetSeqDisablesKeyboardEnhancements(t *testing.T) {
 	if !bytes.Contains([]byte(termResetSeq), []byte("\x1b[=0;1u")) {
 		t.Fatalf("termResetSeq missing kitty keyboard reset: %q", termResetSeq)
 	}
+	if !bytes.Contains([]byte(termResetSeq), []byte("\x1b[0 q")) {
+		t.Fatalf("termResetSeq missing cursor-style reset: %q", termResetSeq)
+	}
+}
+
+func TestExitSeqForSwitchSkipsFullClear(t *testing.T) {
+	if got := exitSeqForSwitch(true); got != termResetSeq {
+		t.Fatalf("exitSeqForSwitch(true) = %q, want termResetSeq", got)
+	}
+	if got := exitSeqForSwitch(false); got != termExitSeq {
+		t.Fatalf("exitSeqForSwitch(false) = %q, want termExitSeq", got)
+	}
 }

@@ -241,6 +241,7 @@ tsm version
 - attach to the named session
 - create it if it does not exist
 - if run from inside another attached session, switch locally instead of nesting one attach inside another PTY
+- local switches avoid the full terminal clear path, so switching is less visually disruptive
 - if the session daemon was started by an older `tsm` build, warn so you know to recreate the session if behavior looks stale
 
 ### New session with command
@@ -594,6 +595,7 @@ What it provides:
 - `$TSM_SESSION`
 - `$TSM_SHELL_INTEGRATION`
 - `Ctrl+]` opens the simplified palette
+- child sessions created from inside an attached session preserve the original shell config path instead of recursively reusing the generated shim
 
 This integration is applied to fresh sessions started with the current binary. Existing already-running sessions keep the shell environment they started with.
 

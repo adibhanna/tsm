@@ -200,6 +200,8 @@ Each shim provides:
 
 The integration is session-local. Fresh sessions pick up the current integration logic. Existing running sessions keep the shell environment they started with.
 
+When a new session is created from inside an already attached TSM shell, the child session preserves the original shell config path (`TSM_ORIG_ZDOTDIR` / `TSM_ORIG_XDG_CONFIG_HOME`) instead of recursively inheriting the generated integration shim.
+
 This shell integration is intentionally not a global launcher. Opening the picker from a normal shell, terminal app, or Neovim mapping is a separate layer that the user configures outside TSM's in-session shell shim.
 
 ## Rename Handling
@@ -270,7 +272,7 @@ Instead:
 3. the outer attach client intercepts it
 4. the client reconnects to the target session
 
-This is what makes palette-based switching from inside an attached session work like a real session switch instead of a nested terminal.
+This is what makes palette-based switching from inside an attached session work like a real session switch instead of a nested terminal. The client also skips the full terminal clear path during this handoff so the switch is less visually disruptive.
 
 ## Release Model
 

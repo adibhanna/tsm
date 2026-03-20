@@ -546,7 +546,10 @@ func buildDaemonEnv(cfg Config, name, shell string, shellCmd []string) ([]string
 		if err != nil {
 			return nil, err
 		}
-		origZdotdir := os.Getenv("ZDOTDIR")
+		origZdotdir := os.Getenv("TSM_ORIG_ZDOTDIR")
+		if origZdotdir == "" {
+			origZdotdir = os.Getenv("ZDOTDIR")
+		}
 		if origZdotdir == "" {
 			origZdotdir, _ = os.UserHomeDir()
 		}
@@ -567,7 +570,10 @@ func buildDaemonEnv(cfg Config, name, shell string, shellCmd []string) ([]string
 		if err != nil {
 			return nil, err
 		}
-		origXDG := os.Getenv("XDG_CONFIG_HOME")
+		origXDG := os.Getenv("TSM_ORIG_XDG_CONFIG_HOME")
+		if origXDG == "" {
+			origXDG = os.Getenv("XDG_CONFIG_HOME")
+		}
 		if origXDG == "" {
 			home, _ := os.UserHomeDir()
 			if home != "" {

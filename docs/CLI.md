@@ -48,6 +48,7 @@ help    = h
 - attach to the named session
 - create it if it does not exist
 - if run inside another attached session, perform a local client-side switch instead of nesting the new attach inside the current PTY
+- local switches avoid the full terminal clear path, so switching is less visually disruptive
 - warn if the session daemon is still running an older `tsm` build after a rebuild
 
 Examples:
@@ -387,6 +388,8 @@ Supported integrated shells:
 - `zsh`
 - `bash`
 - `fish`
+
+Child sessions created from inside an attached session preserve the original shell config path instead of recursively inheriting the generated TSM shim.
 
 If you want a global shell shortcut from anywhere, add one of these snippets.
 

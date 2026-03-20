@@ -133,6 +133,38 @@ func TestBuildDaemonEnvAddsZshIntegration(t *testing.T) {
 	}
 }
 
+func TestBuildDaemonEnvPreservesOriginalZdotdirInsideSession(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	shim := filepath.Join(dir, "shim")
+	if err := os.MkdirAll(home, 0o750); err != nil {
+		t.Fatalf("mkdir home: %v", err)
+	}
+	if err := os.MkdirAll(shim, 0o750); err != nil {
+		t.Fatalf("mkdir shim: %v", err)
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv("ZDOTDIR", shim)
+	t.Setenv("TSM_ORIG_ZDOTDIR", home)
+	t.Setenv("TSM_DIR", dir)
+
+	cfg := DefaultConfig()
+	env, err := buildDaemonEnv(cfg, "child", "/bin/zsh", nil)
+	if err != nil {
+		t.Fatalf("buildDaemonEnv: %v", err)
+	}
+
+	values := map[string]string{}
+	for _, kv := range env {
+		key, value, _ := strings.Cut(kv, "=")
+		values[key] = value
+	}
+	if got := values["TSM_ORIG_ZDOTDIR"]; got != home {
+		t.Fatalf("TSM_ORIG_ZDOTDIR = %q, want %q", got, home)
+	}
+}
+
 func TestBuildDaemonEnvAddsBashIntegration(t *testing.T) {
 	cfg := Config{SocketDir: t.TempDir()}
 	env, err := buildDaemonEnv(cfg, "demo", "/bin/bash", nil)
@@ -201,6 +233,36 @@ func TestBuildDaemonEnvAddsFishIntegration(t *testing.T) {
 	}
 	if !strings.Contains(string(content), `bind \c] __tsm_session_palette`) {
 		t.Fatalf("generated fish config missing Ctrl+] palette binding: %q", string(content))
+	}
+}
+
+func TestBuildDaemonEnvPreservesOriginalXDGInsideSession(t *testing.T) {
+	dir := t.TempDir()
+	orig := filepath.Join(dir, "orig-xdg")
+	shim := filepath.Join(dir, "shim-xdg")
+	if err := os.MkdirAll(orig, 0o750); err != nil {
+		t.Fatalf("mkdir orig: %v", err)
+	}
+	if err := os.MkdirAll(shim, 0o750); err != nil {
+		t.Fatalf("mkdir shim: %v", err)
+	}
+
+	t.Setenv("XDG_CONFIG_HOME", shim)
+	t.Setenv("TSM_ORIG_XDG_CONFIG_HOME", orig)
+
+	cfg := Config{SocketDir: t.TempDir()}
+	env, err := buildDaemonEnv(cfg, "child", "/opt/homebrew/bin/fish", nil)
+	if err != nil {
+		t.Fatalf("buildDaemonEnv: %v", err)
+	}
+
+	values := map[string]string{}
+	for _, kv := range env {
+		key, value, _ := strings.Cut(kv, "=")
+		values[key] = value
+	}
+	if got := values["TSM_ORIG_XDG_CONFIG_HOME"]; got != orig {
+		t.Fatalf("TSM_ORIG_XDG_CONFIG_HOME = %q, want %q", got, orig)
 	}
 }
 

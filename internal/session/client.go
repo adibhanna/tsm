@@ -34,9 +34,9 @@ func isDetachKey(data []byte) bool {
 
 // Terminal reset sequences sent before attach and on detach.
 // Disables mouse tracking, bracketed paste, focus events, keyboard enhancement
-// modes, alt screen; shows cursor.
+// modes, alt screen; resets cursor style to the terminal default; shows cursor.
 const termResetSeq = "\033[?1000l\033[?1002l\033[?1003l\033[?1006l" +
-	"\033[?2004l\033[?1004l\033[>4m\033[=0;1u\033[?1049l" +
+	"\033[?2004l\033[?1004l\033[>4m\033[=0;1u\033[0 q\033[?1049l" +
 	"\033[?25h" +
 	"\033[0m"
 
@@ -58,10 +58,13 @@ func Attach(cfg Config, name string) error {
 	if err != nil {
 		return fmt.Errorf("raw mode: %w", err)
 	}
+	var switchErr *SwitchSessionError
 	defer func() {
 		term.Restore(int(os.Stdin.Fd()), oldState)
-		// Reset terminal modes that the session may have enabled.
-		os.Stdout.WriteString(termExitSeq)
+		// Reset terminal modes that the session may have enabled. When we're
+		// about to switch directly into another attach, avoid the full clear so
+		// we don't flash the previous screen right before the new session takes over.
+		os.Stdout.WriteString(exitSeqForSwitch(switchErr != nil))
 	}()
 
 	// Ignore SIGQUIT so Ctrl+\ doesn't kill us — we use it to detach.
@@ -85,7 +88,6 @@ func Attach(cfg Config, name string) error {
 	done := make(chan struct{})
 	var once sync.Once
 	closeDone := func() { once.Do(func() { close(done) }) }
-	var switchErr *SwitchSessionError
 
 	// Relay server output → stdout.
 	go func() {
@@ -155,6 +157,13 @@ func Attach(cfg Config, name string) error {
 		return switchErr
 	}
 	return nil
+}
+
+func exitSeqForSwitch(switching bool) string {
+	if switching {
+		return termResetSeq
+	}
+	return termExitSeq
 }
 
 func sendInit(conn net.Conn) error {
