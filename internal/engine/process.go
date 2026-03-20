@@ -9,31 +9,39 @@ import (
 
 // ProcessInfo holds per-session process data fetched asynchronously.
 type ProcessInfo struct {
-	Memory         uint64
-	Uptime         int // seconds
-	AgentKind      string
-	AgentState     string
-	AgentSummary   string
-	AgentUpdated   int64
-	AgentModel     string
-	AgentVersion   string
-	AgentPrompt    string
-	AgentPlan      string
-	AgentApproval  string
-	AgentSandbox   string
-	AgentBranch    string
-	AgentGitSHA    string
-	AgentGitOrigin string
-	AgentName      string
-	AgentRole      string
-	AgentMemory    string
-	AgentSessionID string
-	AgentSubagent  bool
-	AgentInput     int64
-	AgentOutput    int64
-	AgentCached    int64
-	AgentTotal     int64
-	AgentContext   int64
+	Memory            uint64
+	Uptime            int // seconds
+	AgentKind         string
+	AgentState        string
+	AgentSummary      string
+	AgentUpdated      int64
+	AgentModel        string
+	AgentVersion      string
+	AgentPrompt       string
+	AgentPlan         string
+	AgentApproval     string
+	AgentSandbox      string
+	AgentBranch       string
+	AgentGitSHA       string
+	AgentGitOrigin    string
+	AgentName         string
+	AgentRole         string
+	AgentMemory       string
+	AgentSessionID    string
+	AgentSubagent     bool
+	AgentInput        int64
+	AgentOutput       int64
+	AgentCached       int64
+	AgentTotal        int64
+	AgentContext      int64
+	AgentCostUSD      float64
+	AgentDurationMS   int64
+	AgentAPIMS        int64
+	AgentLinesAdded   int64
+	AgentLinesRemoved int64
+	AgentOutputStyle  string
+	AgentProjectDir   string
+	AgentWorktreePath string
 }
 
 // FetchProcessInfo returns a map of session name → ProcessInfo.
@@ -53,10 +61,10 @@ func FetchProcessInfo(sessions []Session) map[string]ProcessInfo {
 			Uptime: etimeMap[pid],
 		}
 		if kind := detectAgentKind(pid, childMap, commMap); kind != "" {
-			cacheKey := kind + "\x00" + s.StartedIn
+			cacheKey := kind + "\x00" + s.Name + "\x00" + s.StartedIn
 			status, ok := agentCache[cacheKey]
 			if !ok {
-				status = lookupAgentStatus(kind, s.StartedIn)
+				status = lookupAgentStatus(kind, s.Name, s.StartedIn)
 				agentCache[cacheKey] = status
 			}
 			info.AgentKind = status.Kind
@@ -82,6 +90,14 @@ func FetchProcessInfo(sessions []Session) map[string]ProcessInfo {
 			info.AgentCached = status.CachedTokens
 			info.AgentTotal = status.TotalTokens
 			info.AgentContext = status.ContextWindow
+			info.AgentCostUSD = status.CostUSD
+			info.AgentDurationMS = status.DurationMS
+			info.AgentAPIMS = status.APIDurationMS
+			info.AgentLinesAdded = status.LinesAdded
+			info.AgentLinesRemoved = status.LinesRemoved
+			info.AgentOutputStyle = status.OutputStyle
+			info.AgentProjectDir = status.ProjectDir
+			info.AgentWorktreePath = status.WorktreePath
 		}
 		result[s.Name] = info
 	}

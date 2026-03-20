@@ -674,6 +674,15 @@ func renderOverviewRows(s Session) []string {
 	if s.AgentPlan != "" {
 		rows = append(rows, "source: "+s.AgentPlan)
 	}
+	if s.AgentOutputStyle != "" {
+		rows = append(rows, "style: "+s.AgentOutputStyle)
+	}
+	if s.AgentProjectDir != "" {
+		rows = append(rows, "project: "+s.AgentProjectDir)
+	}
+	if s.AgentWorktreePath != "" {
+		rows = append(rows, "worktree: "+s.AgentWorktreePath)
+	}
 	return rows
 }
 
@@ -690,6 +699,18 @@ func renderRuntimeRows(s Session) []string {
 	}
 	if sha := shortSHA(s.AgentGitSHA); sha != "" {
 		rows = append(rows, "commit: "+sha)
+	}
+	if s.AgentCostUSD > 0 {
+		rows = append(rows, fmt.Sprintf("cost: $%.4f", s.AgentCostUSD))
+	}
+	if s.AgentDurationMS > 0 {
+		rows = append(rows, "duration: "+formatMillis(s.AgentDurationMS))
+	}
+	if s.AgentAPIMS > 0 {
+		rows = append(rows, "api wait: "+formatMillis(s.AgentAPIMS))
+	}
+	if s.AgentLinesAdded > 0 || s.AgentLinesRemoved > 0 {
+		rows = append(rows, fmt.Sprintf("changes: +%d/-%d", s.AgentLinesAdded, s.AgentLinesRemoved))
 	}
 	return rows
 }
@@ -740,6 +761,24 @@ func shortSHA(sha string) string {
 		return sha[:8]
 	}
 	return sha
+}
+
+func formatMillis(ms int64) string {
+	if ms <= 0 {
+		return "0s"
+	}
+	secs := ms / 1000
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	mins := secs / 60
+	secs = secs % 60
+	if mins < 60 {
+		return fmt.Sprintf("%dm %ds", mins, secs)
+	}
+	hours := mins / 60
+	mins = mins % 60
+	return fmt.Sprintf("%dh %dm", hours, mins)
 }
 
 func displayAgentKind(kind string) string {

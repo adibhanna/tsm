@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -84,6 +87,8 @@ func main() {
 		cmdDoctor()
 	case "debug":
 		cmdDebug()
+	case "claude-statusline":
+		cmdClaudeStatusline()
 	case "help", "h", "-h", "--help":
 		printUsage()
 	default:
@@ -91,6 +96,29 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Run 'tsm help' for usage.")
 		os.Exit(1)
 	}
+}
+
+func cmdClaudeStatusline() {
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Claude statusline error: read stdin: %v\n", err)
+		os.Exit(1)
+	}
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return
+	}
+	if !json.Valid(data) {
+		fmt.Fprintln(os.Stderr, "Claude statusline error: invalid JSON input")
+		os.Exit(1)
+	}
+	if name := strings.TrimSpace(os.Getenv("TSM_SESSION")); name != "" {
+		if err := session.WriteClaudeStatusline(session.DefaultConfig(), name, append(data, '\n')); err != nil {
+			fmt.Fprintf(os.Stderr, "Claude statusline error: write session status: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	fmt.Println(formatClaudeStatusline(data))
 }
 
 func cmdAttach() {
@@ -268,10 +296,28 @@ func attachSession(cfg session.Config, name string, createIfMissing bool) error 
 	} else if !session.IsSocket(path) {
 		return fmt.Errorf("%w: %q", session.ErrSessionNotFound, name)
 	}
+	if warning := daemonBuildWarning(cfg, name); warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
+	}
 	if err := markSessionFocused(cfg, name, os.Getenv("TSM_SESSION")); err != nil {
 		return fmt.Errorf("record focus: %w", err)
 	}
 	return session.Attach(cfg, name)
+}
+
+func daemonBuildWarning(cfg session.Config, name string) string {
+	daemonInfo, err := session.ReadDaemonBuildInfo(cfg, name)
+	if err != nil || daemonInfo.ModTimeUnix == 0 {
+		return ""
+	}
+	currentInfo, err := session.CurrentBuildInfo()
+	if err != nil || currentInfo.ModTimeUnix == 0 {
+		return ""
+	}
+	if daemonInfo.Executable == currentInfo.Executable && daemonInfo.ModTimeUnix == currentInfo.ModTimeUnix {
+		return ""
+	}
+	return fmt.Sprintf("Warning: session %q is running an older tsm daemon build.\nRecreate the session to pick up the latest session logic if behavior looks stale.", name)
 }
 
 func suggestSessionName(cfg session.Config, sessions []session.Session) (string, error) {
@@ -843,6 +889,7 @@ Usage:
   tsm tui [--simplified] [--keymap default|palette]
                            Open interactive TUI
   tsm palette              Open simplified session palette
+  tsm claude-statusline    Capture Claude Code statusline JSON for TSM previews
   tsm config install       Install default config into ~/.config/tsm/config.toml
   tsm attach [name]        Attach to session (smart attach if omitted)
   tsm toggle               Switch to the previous session
@@ -926,6 +973,59 @@ func versionMetadata() string {
 		return ""
 	}
 	return "(" + strings.Join(items, ", ") + ")"
+}
+
+func formatClaudeStatusline(data []byte) string {
+	var payload struct {
+		Model struct {
+			DisplayName string `json:"display_name"`
+		} `json:"model"`
+		Workspace struct {
+			CurrentDir string `json:"current_dir"`
+		} `json:"workspace"`
+		ContextWindow struct {
+			UsedPercentage any `json:"used_percentage"`
+		} `json:"context_window"`
+		Cost struct {
+			TotalCostUSD float64 `json:"total_cost_usd"`
+		} `json:"cost"`
+	}
+	if json.Unmarshal(data, &payload) != nil {
+		return ""
+	}
+	parts := []string{}
+	if model := strings.TrimSpace(payload.Model.DisplayName); model != "" {
+		parts = append(parts, "["+model+"]")
+	}
+	if dir := strings.TrimSpace(payload.Workspace.CurrentDir); dir != "" {
+		parts = append(parts, filepath.Base(dir))
+	}
+	if pct := formatClaudeStatuslinePercent(payload.ContextWindow.UsedPercentage); pct != "" {
+		parts = append(parts, pct+" context")
+	}
+	if payload.Cost.TotalCostUSD > 0 {
+		parts = append(parts, fmt.Sprintf("$%.2f", payload.Cost.TotalCostUSD))
+	}
+	return strings.Join(parts, "  ")
+}
+
+func formatClaudeStatuslinePercent(v any) string {
+	switch n := v.(type) {
+	case float64:
+		return fmt.Sprintf("%.0f%%", n)
+	case int:
+		return fmt.Sprintf("%d%%", n)
+	case int64:
+		return fmt.Sprintf("%d%%", n)
+	case json.Number:
+		f, err := n.Float64()
+		if err != nil {
+			return ""
+		}
+		return fmt.Sprintf("%.0f%%", f)
+	default:
+		return ""
+	}
 }
 
 func shortCommit(c string) string {

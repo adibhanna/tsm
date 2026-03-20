@@ -430,6 +430,19 @@ func TestVersionStringForReleaseBuild(t *testing.T) {
 	}
 }
 
+func TestFormatClaudeStatusline(t *testing.T) {
+	got := formatClaudeStatusline([]byte(`{
+		"model":{"display_name":"Opus"},
+		"workspace":{"current_dir":"/Users/test/work"},
+		"context_window":{"used_percentage":8},
+		"cost":{"total_cost_usd":0.01234}
+	}`))
+	want := "[Opus]  work  8% context  $0.01"
+	if got != want {
+		t.Fatalf("formatClaudeStatusline() = %q, want %q", got, want)
+	}
+}
+
 func TestFormatSessionActionErrorNotFound(t *testing.T) {
 	msg := formatSessionActionError("attach", "demo", fmt.Errorf("%w: %q", session.ErrSessionNotFound, "demo"))
 	if !strings.Contains(msg, `Cannot attach session "demo": session not found.`) {
@@ -457,6 +470,54 @@ func TestFormatSessionActionErrorTimeout(t *testing.T) {
 	}
 	if !strings.Contains(msg, "tsm debug session demo") {
 		t.Fatalf("message missing debug guidance: %q", msg)
+	}
+}
+
+func TestDaemonBuildWarningForOlderSessionBuild(t *testing.T) {
+	cfg := session.Config{LogDir: t.TempDir()}
+	dir := filepath.Join(cfg.LogDir, "daemon-build")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	current, err := session.CurrentBuildInfo()
+	if err != nil {
+		t.Fatalf("CurrentBuildInfo: %v", err)
+	}
+	data, err := json.Marshal(session.DaemonBuildInfo{
+		Executable:  current.Executable,
+		ModTimeUnix: current.ModTimeUnix - 60,
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "demo.json"), data, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	got := daemonBuildWarning(cfg, "demo")
+	if !strings.Contains(got, `session "demo" is running an older tsm daemon build`) {
+		t.Fatalf("daemonBuildWarning() = %q", got)
+	}
+}
+
+func TestDaemonBuildWarningEmptyWhenBuildMatches(t *testing.T) {
+	cfg := session.Config{LogDir: t.TempDir()}
+	dir := filepath.Join(cfg.LogDir, "daemon-build")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	current, err := session.CurrentBuildInfo()
+	if err != nil {
+		t.Fatalf("CurrentBuildInfo: %v", err)
+	}
+	data, err := json.Marshal(current)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "demo.json"), append(data, '\n'), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if got := daemonBuildWarning(cfg, "demo"); got != "" {
+		t.Fatalf("daemonBuildWarning() = %q, want empty", got)
 	}
 }
 

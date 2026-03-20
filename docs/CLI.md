@@ -6,6 +6,7 @@
 tsm
 tsm tui [--simplified] [--keymap default|palette]
 tsm palette
+tsm claude-statusline
 tsm config install [--force]
 tsm attach [name]
 tsm detach [name]
@@ -47,6 +48,7 @@ help    = h
 - attach to the named session
 - create it if it does not exist
 - if run inside another attached session, perform a local client-side switch instead of nesting the new attach inside the current PTY
+- warn if the session daemon is still running an older `tsm` build after a rebuild
 
 Examples:
 
@@ -179,6 +181,32 @@ tsm p
 ```
 
 The simplified palette shows the same selected-session agent activity line, so you can check what Codex or Claude was doing before attaching.
+
+## Claude Code Statusline Integration
+
+If you want richer detached Claude previews, configure Claude Code to run:
+
+```text
+tsm claude-statusline
+```
+
+as its `statusLine.command`.
+
+That command:
+
+- captures Claude's official structured statusline JSON into a per-session sidecar
+- prints a compact status line back to Claude Code
+
+With this enabled, the full TUI can show official Claude fields like:
+
+- model and version
+- cost and duration
+- API wait time
+- lines added / removed
+- output style
+- project directory and worktree path
+
+Without it, TSM falls back to local Claude transcript inference.
 
 Layout toggle inside the TUI:
 

@@ -80,6 +80,10 @@ func StartDaemon(name string, shellCmd []string) error {
 	}
 	defer ln.Close()
 	defer os.Remove(sockPath)
+	defer RemoveDaemonBuildInfo(cfg, name)
+	if err := writeDaemonBuildInfo(cfg, name); err != nil {
+		return fmt.Errorf("write daemon build info: %w", err)
+	}
 
 	// Determine shell command.
 	shell := resolveShellPath(shellCmd)

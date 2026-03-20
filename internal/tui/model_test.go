@@ -513,24 +513,31 @@ func TestSimplifiedViewShowsStaleAgentWithoutFallbackSummary(t *testing.T) {
 func TestFullViewShowsSelectedAgentStatus(t *testing.T) {
 	m := NewModel(Options{Mode: ModeFull})
 	m.width = 120
-	m.height = 30
+	m.height = 40
 	m.sessions = []Session{{
-		Name:          "alpha",
-		PID:           "1",
-		AgentKind:     "claude",
-		AgentState:    "done",
-		AgentSummary:  "Here are the files",
-		AgentUpdated:  1,
-		AgentModel:    "claude-opus-4-6",
-		AgentVersion:  "2.1.79",
-		AgentPrompt:   "list all files",
-		AgentBranch:   "main",
-		AgentName:     "keen-dawn",
-		AgentSubagent: true,
-		AgentInput:    10,
-		AgentOutput:   20,
-		AgentCached:   30,
-		AgentTotal:    60,
+		Name:              "alpha",
+		PID:               "1",
+		AgentKind:         "claude",
+		AgentState:        "done",
+		AgentSummary:      "Here are the files",
+		AgentUpdated:      time.Now().Unix(),
+		AgentModel:        "claude-opus-4-6",
+		AgentVersion:      "2.1.79",
+		AgentPrompt:       "list all files",
+		AgentBranch:       "main",
+		AgentName:         "keen-dawn",
+		AgentSubagent:     true,
+		AgentOutputStyle:  "default",
+		AgentProjectDir:   "/Users/test/work",
+		AgentCostUSD:      0.0123,
+		AgentDurationMS:   45000,
+		AgentAPIMS:        2300,
+		AgentLinesAdded:   156,
+		AgentLinesRemoved: 23,
+		AgentInput:        10,
+		AgentOutput:       20,
+		AgentCached:       30,
+		AgentTotal:        60,
 	}}
 	m.preview = "preview"
 	m.markSessionsChanged()
@@ -541,6 +548,12 @@ func TestFullViewShowsSelectedAgentStatus(t *testing.T) {
 	}
 	if !strings.Contains(view, "overview") || !strings.Contains(view, "branch: main") || !strings.Contains(view, "agent: keen-dawn (subagent)") {
 		t.Fatalf("full view missing overview details: %q", view)
+	}
+	if !strings.Contains(view, "style: default") || !strings.Contains(view, "project: /Users/test/work") {
+		t.Fatalf("full view missing official Claude statusline fields: %q", view)
+	}
+	if !strings.Contains(view, "cost: $0.0123") || !strings.Contains(view, "duration: 45s") || !strings.Contains(view, "changes: +156/-23") {
+		t.Fatalf("full view missing Claude runtime metrics: %q", view)
 	}
 	if !strings.Contains(view, "usage") || !strings.Contains(view, "tokens: 60 total") || !strings.Contains(view, "output: 20") {
 		t.Fatalf("full view missing usage details: %q", view)

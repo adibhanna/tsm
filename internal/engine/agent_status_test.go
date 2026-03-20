@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adibhanna/tsm/internal/session"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -25,9 +26,9 @@ func TestFetchProcessInfoIncludesAgentStatus(t *testing.T) {
 			"101 100 200 00:09 /Applications/Codex.app/Contents/Resources/codex\n",
 	)
 
-	lookupAgentStatus = func(kind, cwd string) agentStatus {
-		if kind != "codex" || cwd != "/tmp/work" {
-			t.Fatalf("lookupAgentStatus(%q, %q)", kind, cwd)
+	lookupAgentStatus = func(kind, sessionName, cwd string) agentStatus {
+		if kind != "codex" || sessionName != "work" || cwd != "/tmp/work" {
+			t.Fatalf("lookupAgentStatus(%q, %q, %q)", kind, sessionName, cwd)
 		}
 		return agentStatus{
 			Kind:      "codex",
@@ -145,7 +146,7 @@ func TestLookupClaudeStatusFromSessionJSONL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status := lookupClaudeStatus(cwd)
+	status := lookupClaudeStatus("", cwd)
 	if status.Kind != "claude" || status.State != "working" || !strings.Contains(status.Summary, "README.md") {
 		t.Fatalf("status = %+v", status)
 	}
@@ -174,7 +175,7 @@ func TestLookupClaudeStatusCapturesBranchAndSubagent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status := lookupClaudeStatus(cwd)
+	status := lookupClaudeStatus("", cwd)
 	if status.GitBranch != "main" || status.SessionID != "sess-1" || status.AgentName != "keen-dawn" || !status.IsSubagent {
 		t.Fatalf("status = %+v", status)
 	}
@@ -220,9 +221,63 @@ func TestLookupClaudeStatusSkipsLowSignalNewestSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status := lookupClaudeStatus(cwd)
+	status := lookupClaudeStatus("", cwd)
 	if status.Kind != "claude" || status.LastPrompt != "list all the files" {
 		t.Fatalf("status = %+v", status)
+	}
+}
+
+func TestLookupClaudeStatusMergesStatuslineSidecar(t *testing.T) {
+	home := t.TempDir()
+	origHome := agentUserHomeDir
+	defer func() { agentUserHomeDir = origHome }()
+	agentUserHomeDir = func() (string, error) { return home, nil }
+
+	cfg := session.DefaultConfig()
+	t.Setenv("TSM_DIR", t.TempDir())
+	cfg = session.DefaultConfig()
+	if err := session.WriteClaudeStatusline(cfg, "cc", []byte(`{
+		"session_id":"sess-1",
+		"version":"2.1.79",
+		"model":{"id":"claude-opus-4-6","display_name":"Opus"},
+		"workspace":{"project_dir":"/Users/test/work"},
+		"output_style":{"name":"default"},
+		"cost":{"total_cost_usd":0.0123,"total_duration_ms":45000,"total_api_duration_ms":2300,"total_lines_added":156,"total_lines_removed":23},
+		"context_window":{"total_input_tokens":15234,"total_output_tokens":4521,"context_window_size":200000,"current_usage":{"cache_creation_input_tokens":5000,"cache_read_input_tokens":2000}},
+		"worktree":{"branch":"main","path":"/tmp/worktree"}
+	}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	cwd := "/Users/test/work"
+	projectDir := filepath.Join(home, ".claude", "projects", sanitizeClaudeProjectPath(cwd))
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionPath := filepath.Join(projectDir, "session.jsonl")
+	content := strings.Join([]string{
+		`{"type":"user","timestamp":"2026-03-19T12:00:00Z","message":{"content":"please update the docs"}}`,
+		`{"type":"assistant","timestamp":"2026-03-19T12:00:03Z","message":{"content":[{"type":"text","text":"Done."}],"stop_reason":"end_turn"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(sessionPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	status := lookupClaudeStatus("cc", cwd)
+	if status.Model != "claude-opus-4-6" || status.Version != "2.1.79" {
+		t.Fatalf("expected statusline model/version, got %+v", status)
+	}
+	if status.CostUSD <= 0 || status.DurationMS != 45000 || status.APIDurationMS != 2300 {
+		t.Fatalf("expected statusline runtime fields, got %+v", status)
+	}
+	if status.LinesAdded != 156 || status.LinesRemoved != 23 {
+		t.Fatalf("expected line counts, got %+v", status)
+	}
+	if status.OutputStyle != "default" || status.ProjectDir != "/Users/test/work" || status.WorktreePath != "/tmp/worktree" {
+		t.Fatalf("expected project/style fields, got %+v", status)
+	}
+	if status.GitBranch != "main" || status.ContextWindow != 200000 {
+		t.Fatalf("expected branch/context fields, got %+v", status)
 	}
 }
 
@@ -247,6 +302,26 @@ func TestClaudeInternalUserMessagesAreIgnored(t *testing.T) {
 	}
 }
 
+func TestClaudeHookProgressFallsBackToLastPrompt(t *testing.T) {
+	status := claudeStatusFromSession(writeTempJSONL(t, []string{
+		`{"type":"progress","timestamp":"2026-03-19T12:00:03Z","data":{"type":"hook_progress","hookName":"Notification","hookEvent":"Start"}}`,
+		`{"type":"last-prompt","lastPrompt":"list all the files","sessionId":"sess-1"}`,
+	}), "/Users/test/work", 0)
+
+	if status.Kind != "claude" || status.State != "working" {
+		t.Fatalf("status = %+v", status)
+	}
+	if status.Summary != "" {
+		t.Fatalf("status.Summary = %q, want empty low-signal hook summary", status.Summary)
+	}
+	if status.LastPrompt != "list all the files" {
+		t.Fatalf("status.LastPrompt = %q, want last prompt", status.LastPrompt)
+	}
+	if got := agentStatusSummary(status, "/Users/test/work"); got != "list all the files" {
+		t.Fatalf("agentStatusSummary() = %q, want last prompt", got)
+	}
+}
+
 func TestAgentStatusSummaryDoesNotFallBackToCwdName(t *testing.T) {
 	status := agentStatus{Kind: "claude", State: "recent"}
 	if got := agentStatusSummary(status, "/Users/test/work/tsm"); got != "" {
@@ -265,6 +340,20 @@ func TestDisplayAgentStateKeepsFreshRecentAsIdle(t *testing.T) {
 	fresh := time.Now().Add(-30 * time.Second).Unix()
 	if got := DisplayAgentState("recent", fresh); got != "idle" {
 		t.Fatalf("DisplayAgentState() = %q, want idle", got)
+	}
+}
+
+func TestCodexStatusFromRolloutDoesNotUseFallbackSummaryForRecentState(t *testing.T) {
+	status := codexStatusFromRollout("/tmp/missing-rollout.jsonl", "project title", 123)
+	if status.Summary != "" {
+		t.Fatalf("status.Summary = %q, want empty", status.Summary)
+	}
+}
+
+func TestClaudeStatusFromSessionDoesNotUseFallbackSummaryForRecentState(t *testing.T) {
+	status := claudeStatusFromSession(writeTempJSONL(t, nil), "/Users/test/work/tsm", 123)
+	if status.Summary != "" {
+		t.Fatalf("status.Summary = %q, want empty", status.Summary)
 	}
 }
 

@@ -211,6 +211,7 @@ Use this if you prefer to stay in the shell.
 tsm
 tsm tui [--simplified] [--keymap default|palette]
 tsm palette
+tsm claude-statusline
 tsm config install [--force]
 tsm attach [name]
 tsm detach [name]
@@ -237,6 +238,7 @@ tsm version
 - attach to the named session
 - create it if it does not exist
 - if run from inside another attached session, switch locally instead of nesting one attach inside another PTY
+- if the session daemon was started by an older `tsm` build, warn so you know to recreate the session if behavior looks stale
 
 ### New session with command
 
@@ -360,6 +362,26 @@ The simplified TUI is the fast-switch mode:
 By default it uses the same keymap as the full TUI.
 
 When TSM detects a live `codex` or `claude` process inside a session, both TUI layouts render a compact agent-status line for the selected session. That line includes the agent type, a coarse state, relative freshness, and the latest short action summary TSM can infer from the local Codex or Claude session data on disk.
+
+For Claude Code, TSM can also use Claude's official statusline JSON surface when you opt in. That gives detached previews richer fields like model, version, cost, duration, line changes, output style, and project/worktree metadata instead of relying only on transcript inference.
+
+To enable it, point Claude Code's `statusLine.command` at `tsm claude-statusline` in your Claude settings:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "tsm claude-statusline"
+  }
+}
+```
+
+`tsm claude-statusline` does two things:
+
+- writes Claude's structured statusline JSON into a per-session sidecar for TSM
+- prints a compact in-Claude status line, so the integration is usable on its own
+
+This integration is optional. Without it, TSM falls back to local Claude transcript inference.
 
 ### Shared default keymap
 

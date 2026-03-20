@@ -37,6 +37,8 @@ flowchart TD
 
 Sessions continue running after detach. Killing a client does not kill the session. Killing the session daemon does.
 
+Each daemon also writes a small build-metadata sidecar. That lets newer clients warn when they attach to a session that is still running an older daemon build after a rebuild.
+
 ## Package Layout
 
 ### `internal/session`
@@ -163,8 +165,20 @@ When the engine sees a descendant `codex` or `claude` process under a session PT
 
 - Codex: local thread state from `~/.codex/state_*.sqlite` plus the latest rollout JSONL for that thread
 - Claude Code: local project session JSONL under `~/.claude/projects/...`
+- Claude Code, when configured: official statusline JSON captured via `tsm claude-statusline`
 
 That data is not used to control the agent. It is only used to render a short status line in the full TUI and simplified palette so users can see what an agent was doing before switching into that session.
+
+The optional `tsm claude-statusline` path gives TSM access to Claude's official structured statusline fields, including:
+
+- model and version
+- cost and duration
+- API wait time
+- lines added / removed
+- output style
+- project directory and worktree path
+
+When that sidecar is present, TSM merges those official Claude fields into the inferred transcript status instead of relying only on local transcript parsing.
 
 ## Shell Integration
 

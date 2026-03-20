@@ -146,7 +146,7 @@ Relevant areas:
 - [internal/session/daemon.go](/Users/adibhanna/Developer/opensource/tsm/internal/session/daemon.go)
 - [README.md](/Users/adibhanna/Developer/opensource/tsm/README.md)
 
-### 6. Improve Agent Status Accuracy
+### ~~6. Improve Agent Status Accuracy~~ Done
 
 Problem:
 
@@ -160,18 +160,21 @@ Why it matters:
 
 Track:
 
-- [ ] keep state labels human and trustworthy
-- [ ] filter internal or low-signal events more aggressively
-- [ ] surface staleness clearly
-- [ ] prefer official Claude integration surfaces where possible
-- [ ] keep compact palette output terse and high-signal
+- [x] keep state labels human and trustworthy
+- [x] filter internal or low-signal events more aggressively
+- [x] surface staleness clearly
+- [x] prefer official Claude integration surfaces where possible
+- [x] keep compact palette output terse and high-signal
 
-In progress:
+What shipped:
 
-- low-signal Claude internal messages are filtered out more aggressively
+- low-signal Claude internal transcript messages are filtered out more aggressively
+- generic Claude hook-progress labels no longer surface raw names like `notification` in compact status output
 - empty agent summaries no longer fall back to cwd names like `tsm`
-- stale or very old agent activity now renders as `stale` instead of generic `recent`
-- fresh low-signal fallback activity now renders as `idle` instead of `recent`
+- stale or very old agent activity now renders as `stale`
+- fresh low-signal fallback activity now renders as `idle`
+- optional official Claude statusline integration via `tsm claude-statusline`, which captures Claude's structured statusline JSON into per-session sidecars for detached previews
+- full TUI Claude previews now show richer official fields when available: cost, duration, API wait time, line changes, output style, project directory, and worktree path
 
 Relevant files:
 
@@ -194,6 +197,11 @@ Track:
 - [ ] reduce shell-specific sharp edges
 - [ ] audit detach/kill/quit screen cleanup paths
 - [ ] improve crash cleanup and stale resource handling
+
+In progress:
+
+- session daemons now record the binary path and build mtime they were started with
+- attach now warns when a session is still running an older daemon build after a rebuild, instead of silently making the new binary look ineffective
 
 Relevant areas:
 

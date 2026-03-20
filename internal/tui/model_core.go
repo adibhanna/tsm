@@ -468,6 +468,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				msg.sessions[i].AgentCached = prev.AgentCached
 				msg.sessions[i].AgentTotal = prev.AgentTotal
 				msg.sessions[i].AgentContext = prev.AgentContext
+				msg.sessions[i].AgentCostUSD = prev.AgentCostUSD
+				msg.sessions[i].AgentDurationMS = prev.AgentDurationMS
+				msg.sessions[i].AgentAPIMS = prev.AgentAPIMS
+				msg.sessions[i].AgentLinesAdded = prev.AgentLinesAdded
+				msg.sessions[i].AgentLinesRemoved = prev.AgentLinesRemoved
+				msg.sessions[i].AgentOutputStyle = prev.AgentOutputStyle
+				msg.sessions[i].AgentProjectDir = prev.AgentProjectDir
+				msg.sessions[i].AgentWorktreePath = prev.AgentWorktreePath
 			}
 		}
 		m.sessions = msg.sessions
@@ -528,6 +536,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sessions[i].AgentCached = info.AgentCached
 				m.sessions[i].AgentTotal = info.AgentTotal
 				m.sessions[i].AgentContext = info.AgentContext
+				m.sessions[i].AgentCostUSD = info.AgentCostUSD
+				m.sessions[i].AgentDurationMS = info.AgentDurationMS
+				m.sessions[i].AgentAPIMS = info.AgentAPIMS
+				m.sessions[i].AgentLinesAdded = info.AgentLinesAdded
+				m.sessions[i].AgentLinesRemoved = info.AgentLinesRemoved
+				m.sessions[i].AgentOutputStyle = info.AgentOutputStyle
+				m.sessions[i].AgentProjectDir = info.AgentProjectDir
+				m.sessions[i].AgentWorktreePath = info.AgentWorktreePath
 				updated = true
 			}
 		}

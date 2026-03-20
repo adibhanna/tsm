@@ -14,6 +14,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/adibhanna/tsm/internal/session"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -41,6 +42,14 @@ type agentStatus struct {
 	CachedTokens  int64
 	TotalTokens   int64
 	ContextWindow int64
+	CostUSD       float64
+	DurationMS    int64
+	APIDurationMS int64
+	LinesAdded    int64
+	LinesRemoved  int64
+	OutputStyle   string
+	ProjectDir    string
+	WorktreePath  string
 }
 
 var (
@@ -48,12 +57,12 @@ var (
 	lookupAgentStatus = resolveAgentStatus
 )
 
-func resolveAgentStatus(kind, cwd string) agentStatus {
+func resolveAgentStatus(kind, sessionName, cwd string) agentStatus {
 	switch kind {
 	case "codex":
 		return lookupCodexStatus(cwd)
 	case "claude":
-		return lookupClaudeStatus(cwd)
+		return lookupClaudeStatus(sessionName, cwd)
 	default:
 		return agentStatus{}
 	}
@@ -141,16 +150,18 @@ func lookupCodexStatus(cwd string) agentStatus {
 	return status
 }
 
-func lookupClaudeStatus(cwd string) agentStatus {
+func lookupClaudeStatus(sessionName, cwd string) agentStatus {
 	home, err := agentUserHomeDir()
 	if err != nil {
 		return agentStatus{}
 	}
 
+	sidecar := readClaudeStatusline(session.DefaultConfig(), sessionName)
+
 	projectDir := filepath.Join(home, ".claude", "projects", sanitizeClaudeProjectPath(cwd))
 	entries, err := os.ReadDir(projectDir)
 	if err != nil {
-		return agentStatus{}
+		return mergeClaudeStatus(agentStatus{}, sidecar)
 	}
 
 	type candidate struct {
@@ -172,7 +183,7 @@ func lookupClaudeStatus(cwd string) agentStatus {
 		})
 	}
 	if len(candidates) == 0 {
-		return agentStatus{}
+		return mergeClaudeStatus(agentStatus{}, sidecar)
 	}
 
 	slices.SortFunc(candidates, func(a, b candidate) int {
@@ -192,6 +203,7 @@ func lookupClaudeStatus(cwd string) agentStatus {
 		if status.Kind == "" {
 			continue
 		}
+		status = mergeClaudeStatus(status, sidecar)
 		if fallback.Kind == "" {
 			fallback = status
 		}
@@ -199,7 +211,7 @@ func lookupClaudeStatus(cwd string) agentStatus {
 			return status
 		}
 	}
-	return fallback
+	return mergeClaudeStatus(fallback, sidecar)
 }
 
 func latestMatchingPath(dir, pattern string) (string, error) {
@@ -235,7 +247,6 @@ func codexStatusFromRollout(path, fallback string, fallbackUpdated int64) agentS
 		return agentStatus{
 			Kind:      "codex",
 			State:     "recent",
-			Summary:   fallback,
 			UpdatedAt: fallbackUpdated,
 		}
 	}
@@ -243,7 +254,6 @@ func codexStatusFromRollout(path, fallback string, fallbackUpdated int64) agentS
 	status := agentStatus{
 		Kind:      "codex",
 		State:     "recent",
-		Summary:   fallback,
 		UpdatedAt: fallbackUpdated,
 	}
 
@@ -330,7 +340,6 @@ func claudeStatusFromSession(path, fallback string, fallbackUpdated int64) agent
 		return agentStatus{
 			Kind:      "claude",
 			State:     "recent",
-			Summary:   filepath.Base(fallback),
 			UpdatedAt: fallbackUpdated,
 		}
 	}
@@ -338,7 +347,6 @@ func claudeStatusFromSession(path, fallback string, fallbackUpdated int64) agent
 	status := agentStatus{
 		Kind:      "claude",
 		State:     "recent",
-		Summary:   filepath.Base(fallback),
 		UpdatedAt: fallbackUpdated,
 	}
 	lastPrompt := ""
@@ -440,7 +448,7 @@ func claudeStatusFromSession(path, fallback string, fallbackUpdated int64) agent
 				lastPrompt = oneLine(payload.LastPrompt)
 			}
 		}
-		if status.Kind != "" && lastPrompt != "" {
+		if status.Kind != "" && status.State != "recent" && lastPrompt != "" {
 			break
 		}
 	}
@@ -462,6 +470,165 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+type claudeStatuslinePayload struct {
+	UpdatedAt int64
+	SessionID string
+	ModelID   string
+	Version   string
+
+	ProjectDir  string
+	OutputStyle string
+	AgentName   string
+
+	GitBranch    string
+	WorktreePath string
+
+	CostUSD       float64
+	DurationMS    int64
+	APIDurationMS int64
+	LinesAdded    int64
+	LinesRemoved  int64
+
+	InputTokens   int64
+	OutputTokens  int64
+	CachedTokens  int64
+	TotalTokens   int64
+	ContextWindow int64
+}
+
+func readClaudeStatusline(cfg session.Config, sessionName string) claudeStatuslinePayload {
+	if strings.TrimSpace(sessionName) == "" {
+		return claudeStatuslinePayload{}
+	}
+	path := session.ClaudeStatuslinePath(cfg, sessionName)
+	data, err := os.ReadFile(path)
+	if err != nil || len(bytes.TrimSpace(data)) == 0 {
+		return claudeStatuslinePayload{}
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return claudeStatuslinePayload{}
+	}
+	var payload struct {
+		SessionID string `json:"session_id"`
+		Version   string `json:"version"`
+		Model     struct {
+			ID string `json:"id"`
+		} `json:"model"`
+		Workspace struct {
+			ProjectDir string `json:"project_dir"`
+		} `json:"workspace"`
+		OutputStyle struct {
+			Name string `json:"name"`
+		} `json:"output_style"`
+		Agent struct {
+			Name string `json:"name"`
+		} `json:"agent"`
+		Worktree struct {
+			Branch string `json:"branch"`
+			Path   string `json:"path"`
+		} `json:"worktree"`
+		Cost struct {
+			TotalCostUSD       float64 `json:"total_cost_usd"`
+			TotalDurationMS    int64   `json:"total_duration_ms"`
+			TotalAPIDurationMS int64   `json:"total_api_duration_ms"`
+			TotalLinesAdded    int64   `json:"total_lines_added"`
+			TotalLinesRemoved  int64   `json:"total_lines_removed"`
+		} `json:"cost"`
+		ContextWindow struct {
+			TotalInputTokens  int64 `json:"total_input_tokens"`
+			TotalOutputTokens int64 `json:"total_output_tokens"`
+			ContextWindowSize int64 `json:"context_window_size"`
+			CurrentUsage      struct {
+				InputTokens              int64 `json:"input_tokens"`
+				OutputTokens             int64 `json:"output_tokens"`
+				CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+				CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+			} `json:"current_usage"`
+		} `json:"context_window"`
+	}
+	if json.Unmarshal(data, &payload) != nil {
+		return claudeStatuslinePayload{}
+	}
+	cached := payload.ContextWindow.CurrentUsage.CacheCreationInputTokens + payload.ContextWindow.CurrentUsage.CacheReadInputTokens
+	total := payload.ContextWindow.TotalInputTokens + payload.ContextWindow.TotalOutputTokens + cached
+	return claudeStatuslinePayload{
+		UpdatedAt:     info.ModTime().Unix(),
+		SessionID:     payload.SessionID,
+		ModelID:       payload.Model.ID,
+		Version:       payload.Version,
+		ProjectDir:    payload.Workspace.ProjectDir,
+		OutputStyle:   payload.OutputStyle.Name,
+		AgentName:     payload.Agent.Name,
+		GitBranch:     payload.Worktree.Branch,
+		WorktreePath:  payload.Worktree.Path,
+		CostUSD:       payload.Cost.TotalCostUSD,
+		DurationMS:    payload.Cost.TotalDurationMS,
+		APIDurationMS: payload.Cost.TotalAPIDurationMS,
+		LinesAdded:    payload.Cost.TotalLinesAdded,
+		LinesRemoved:  payload.Cost.TotalLinesRemoved,
+		InputTokens:   payload.ContextWindow.TotalInputTokens,
+		OutputTokens:  payload.ContextWindow.TotalOutputTokens,
+		CachedTokens:  cached,
+		TotalTokens:   total,
+		ContextWindow: payload.ContextWindow.ContextWindowSize,
+	}
+}
+
+func mergeClaudeStatus(status agentStatus, payload claudeStatuslinePayload) agentStatus {
+	if payload == (claudeStatuslinePayload{}) {
+		return status
+	}
+	if status.Kind == "" {
+		status.Kind = "claude"
+	}
+	if status.State == "" {
+		status.State = "recent"
+	}
+	if payload.UpdatedAt > status.UpdatedAt {
+		status.UpdatedAt = payload.UpdatedAt
+	}
+	if payload.ModelID != "" {
+		status.Model = payload.ModelID
+	}
+	if payload.Version != "" {
+		status.Version = payload.Version
+	}
+	if payload.SessionID != "" {
+		status.SessionID = payload.SessionID
+	}
+	if payload.AgentName != "" && status.AgentName == "" {
+		status.AgentName = payload.AgentName
+	}
+	if payload.GitBranch != "" && status.GitBranch == "" {
+		status.GitBranch = payload.GitBranch
+	}
+	if payload.InputTokens > 0 {
+		status.InputTokens = payload.InputTokens
+	}
+	if payload.OutputTokens > 0 {
+		status.OutputTokens = payload.OutputTokens
+	}
+	if payload.CachedTokens > 0 {
+		status.CachedTokens = payload.CachedTokens
+	}
+	if payload.TotalTokens > 0 {
+		status.TotalTokens = payload.TotalTokens
+	}
+	if payload.ContextWindow > 0 {
+		status.ContextWindow = payload.ContextWindow
+	}
+	status.CostUSD = payload.CostUSD
+	status.DurationMS = payload.DurationMS
+	status.APIDurationMS = payload.APIDurationMS
+	status.LinesAdded = payload.LinesAdded
+	status.LinesRemoved = payload.LinesRemoved
+	status.OutputStyle = payload.OutputStyle
+	status.ProjectDir = payload.ProjectDir
+	status.WorktreePath = payload.WorktreePath
+	return status
 }
 
 func summarizeToolInvocation(name, rawArgs string) string {
@@ -567,13 +734,30 @@ func isInternalClaudeMessage(s string) bool {
 }
 
 func summarizeClaudeHook(name, event string) string {
-	if name != "" {
-		return strings.ToLower(name)
+	label := firstNonEmpty(name, event)
+	if label == "" {
+		return ""
 	}
-	if event != "" {
-		return strings.ToLower(event)
+	normalized := strings.ToLower(strings.TrimSpace(label))
+	normalized = strings.ReplaceAll(normalized, "_", " ")
+	normalized = strings.ReplaceAll(normalized, "-", " ")
+	generic := map[string]struct{}{
+		"hook progress":      {},
+		"hook start":         {},
+		"hook end":           {},
+		"notification":       {},
+		"session start":      {},
+		"user prompt submit": {},
+		"pre tool use":       {},
+		"post tool use":      {},
+		"stop":               {},
+		"subagent stop":      {},
+		"pre compact":        {},
 	}
-	return "active"
+	if _, ok := generic[normalized]; ok {
+		return ""
+	}
+	return normalized
 }
 
 func stringArg(m map[string]any, key string) string {
@@ -735,13 +919,6 @@ func FormatRelativeTime(unixTS int64) string {
 	return FormatUptime(secs)
 }
 
-func agentFallbackSummary(cwd string) string {
-	if base := filepath.Base(cwd); base != "" && base != "." && base != string(filepath.Separator) {
-		return base
-	}
-	return cwd
-}
-
 func agentStatusSummary(status agentStatus, cwd string) string {
 	if status.Summary != "" {
 		return status.Summary
@@ -776,9 +953,5 @@ func isUsefulClaudeStatus(status agentStatus, cwd string) bool {
 	if status.Model != "" || status.Version != "" || status.TotalTokens > 0 || status.LastPrompt != "" {
 		return true
 	}
-	summary := strings.TrimSpace(status.Summary)
-	if summary == "" {
-		return false
-	}
-	return summary != agentFallbackSummary(cwd)
+	return strings.TrimSpace(status.Summary) != ""
 }
