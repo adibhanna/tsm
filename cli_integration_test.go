@@ -424,12 +424,6 @@ func TestCLICommandExitTerminalRecovery(t *testing.T) {
 	}
 }
 
-// TestCLITUIAttach verifies the full TUI picker → attach flow:
-// tsm tui renders sessions, Enter selects, runAttachTarget re-execs into
-// tsm attach, and the process enters the attached state.
-//
-// I/O relay and Ctrl+\ detach through the re-exec'd attach are covered
-// by TestCLIAttachDetachReattach which tests the direct attach path.
 // TestCLIPaletteAttach verifies the simplified palette → attach flow:
 // tsm palette renders sessions, Enter selects, runAttachTarget re-execs
 // into tsm attach, and the process enters the attached state.
