@@ -132,7 +132,9 @@ func Attach(cfg Config, name string) error {
 					SendMessage(conn, TagDetach, nil)
 					return
 				}
-				SendMessage(conn, TagInput, buf[:n])
+				if err := SendMessage(conn, TagInput, buf[:n]); err != nil {
+					return
+				}
 			}
 			if err != nil {
 				return
@@ -153,6 +155,7 @@ func Attach(cfg Config, name string) error {
 	}()
 
 	<-done
+	conn.Close() // unblock any pending I/O on relay goroutines
 	if se := switchErr.Load(); se != nil {
 		return se
 	}

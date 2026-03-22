@@ -42,56 +42,56 @@ Reviewed: 2026-03-21
 ### 5. Goroutine leak — stdin relay in `Attach()`
 
 - **File:** `internal/session/client.go:125-141`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** Stdin relay goroutine blocks on `os.Stdin.Read()` forever after `done` is closed. Leaks until next keystroke.
 - **Fix:** Close the connection or stdin to unblock, or use poll-based approach.
 
 ### 6. Unbounded `logLines` memory growth
 
 - **File:** `internal/tui/model_core.go:383`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** `addLog()` appends indefinitely. Long TUI sessions leak memory.
 - **Fix:** Cap at ~200 entries, discard oldest.
 
 ### 7. PTY write errors silently ignored
 
 - **File:** `internal/session/daemon.go:270,302,342`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** `d.ptmx.Write()` errors discarded. Dead PTY goes unnoticed.
 - **Fix:** Check error, trigger shutdown on write failure.
 
 ### 8. SendMessage errors ignored in stdin relay
 
 - **File:** `internal/session/client.go:132-135`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** Broken connection undetected, data silently discarded.
 - **Fix:** Check error, return from goroutine on failure.
 
 ### 9. Broadcast to non-attached clients
 
 - **File:** `internal/session/daemon.go:383-388`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** `broadcast()` sends to probe/info connections that haven't sent `TagInit`.
 - **Fix:** Filter to `attached == true` clients only.
 
 ### 10. Stack overflow in recursive tree walk
 
 - **File:** `internal/engine/process.go:171`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** `sumTreeRSS` / `detectAgentKind` recurse with no cycle detection. Corrupted `ps` output → crash.
 - **Fix:** Add `visited` map or convert to iterative.
 
 ### 11. SpawnDaemon returns success on failure
 
 - **File:** `internal/session/daemon.go:200-206`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** Returns `nil` even if daemon crashed and socket never appeared.
 - **Fix:** Return error if socket doesn't appear within polling period.
 
 ### 12. Unix socket created without restrictive permissions
 
 - **File:** `internal/session/daemon.go:78`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** Socket inherits umask. Any local process that can reach it can inject keystrokes or kill sessions.
 - **Fix:** `os.Chmod` socket to `0700` after creation, or verify directory permissions are sufficient.
 

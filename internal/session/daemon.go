@@ -79,6 +79,7 @@ func StartDaemon(name string, shellCmd []string) error {
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", sockPath, err)
 	}
+	os.Chmod(sockPath, 0700)
 	defer ln.Close()
 	defer os.Remove(sockPath)
 	if err := writeDaemonBuildInfo(cfg, name); err != nil {
@@ -203,7 +204,7 @@ func SpawnDaemon(name string, shellCmd []string) error {
 			return nil
 		}
 	}
-	return nil
+	return fmt.Errorf("session %q: daemon did not start in time", name)
 }
 
 func (d *Daemon) readPTY() {
@@ -267,7 +268,10 @@ func (d *Daemon) handleClient(conn net.Conn) {
 
 		switch tag {
 		case TagInput:
-			d.ptmx.Write(payload)
+			if _, err := d.ptmx.Write(payload); err != nil {
+				d.doneOnce.Do(func() { close(d.done) })
+				return
+			}
 
 		case TagResize:
 			if len(payload) >= 4 {
@@ -299,7 +303,10 @@ func (d *Daemon) handleClient(conn net.Conn) {
 			// Poke the PTY with Ctrl+L to wake up the app's event loop
 			// and force an immediate screen redraw (works in vim + shells).
 			time.Sleep(10 * time.Millisecond)
-			d.ptmx.Write([]byte{0x0c})
+			if _, err := d.ptmx.Write([]byte{0x0c}); err != nil {
+				d.doneOnce.Do(func() { close(d.done) })
+				return
+			}
 
 		case TagInfo:
 			d.sendInfo(conn)
@@ -339,7 +346,10 @@ func (d *Daemon) handleClient(conn net.Conn) {
 					syscall.Kill(-pgrp, syscall.SIGWINCH)
 				}
 				time.Sleep(10 * time.Millisecond)
-				d.ptmx.Write([]byte{0x0c})
+				if _, err := d.ptmx.Write([]byte{0x0c}); err != nil {
+					d.doneOnce.Do(func() { close(d.done) })
+					return
+				}
 			}
 
 		case TagRun:
@@ -383,6 +393,9 @@ func (d *Daemon) renameSession(newName string) error {
 func (d *Daemon) broadcast(tag Tag, data []byte) {
 	msg := MarshalMessage(tag, data)
 	for _, client := range d.snapshotClients() {
+		if !client.state.attached {
+			continue
+		}
 		client.state.writeMessage(client.conn, msg, 100*time.Millisecond)
 	}
 }

@@ -169,16 +169,30 @@ func FormatUptime(secs int) string {
 
 // sumTreeRSS sums RSS for a process and all its descendants.
 func sumTreeRSS(pid int, rss map[int]uint64, children map[int][]int) uint64 {
+	visited := make(map[int]bool)
+	return sumTreeRSSImpl(pid, rss, children, visited)
+}
+
+func sumTreeRSSImpl(pid int, rss map[int]uint64, children map[int][]int, visited map[int]bool) uint64 {
+	if visited[pid] {
+		return 0
+	}
+	visited[pid] = true
 	total := rss[pid]
 	for _, child := range children[pid] {
-		total += sumTreeRSS(child, rss, children)
+		total += sumTreeRSSImpl(child, rss, children, visited)
 	}
 	return total
 }
 
 func detectAgentKind(pid int, children map[int][]int, comm map[int]string) string {
+	visited := make(map[int]bool)
 	var walk func(int) string
 	walk = func(id int) string {
+		if visited[id] {
+			return ""
+		}
+		visited[id] = true
 		name := strings.ToLower(filepath.Base(comm[id]))
 		switch {
 		case strings.Contains(name, "codex"):

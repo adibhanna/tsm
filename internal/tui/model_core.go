@@ -16,6 +16,7 @@ import (
 const (
 	listMaxOuterWidth = 56
 	logContentHeight  = 4
+	maxLogLines       = 200
 	paletteMaxWidth   = 68
 	paletteMinWidth   = 46
 	paletteMaxRows    = 8
@@ -383,11 +384,17 @@ func computeListMetrics(sessions []Session) listMetrics {
 func (m *Model) addLog(line string) {
 	ts := logDimStyle.Render(time.Now().Format("15:04:05"))
 	m.logLines = append(m.logLines, ts+" "+line)
+	if len(m.logLines) > maxLogLines {
+		m.logLines = m.logLines[len(m.logLines)-maxLogLines:]
+	}
 	maxOff := len(m.logLines) - logContentHeight
 	if maxOff < 0 {
 		maxOff = 0
 	}
 	m.logOffset = maxOff
+	if m.logOffset > len(m.logLines) {
+		m.logOffset = len(m.logLines)
+	}
 }
 
 func (m Model) listContentHeight(helpLines int) int {
