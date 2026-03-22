@@ -759,6 +759,11 @@ if [[ -n "${TSM_SESSION:-}" ]]; then
   fi
   _tsm_precmd_title
 
+  TRAPWINCH() {
+    _tsm_refresh_session_name
+    _tsm_apply_prompt_marker
+  }
+
   if [[ -o interactive ]]; then
     _tsm_session_full() {
       zle -I
@@ -851,6 +856,8 @@ if [[ -n "${TSM_SESSION:-}" ]]; then
       ;;
   esac
   _tsm_precmd
+
+  trap '_tsm_refresh_session_name; _tsm_apply_prompt_marker' WINCH
 
 __TSM_BASH_FULL_BIND__
 __TSM_BASH_PALETTE_BIND__
