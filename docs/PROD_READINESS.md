@@ -102,70 +102,70 @@ Reviewed: 2026-03-21
 ### 13. Double-close on `TagDetachAll`
 
 - **File:** `internal/session/daemon.go:326,435`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** `closeAllClients` closes all conns, then deferred cleanup closes calling client's conn again.
 - **Fix:** Check if conn is still in map before closing in defer.
 
 ### 14. Log scroll keys conflict with palette filter
 
 - **File:** `internal/tui/model_input.go:22`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** `[`/`]` both scroll logs AND append to filter text when palette is active.
 - **Fix:** Return early after `handleLogScroll` if key was consumed.
 
 ### 15. Scrollback `TailLines` excessive allocations
 
 - **File:** `internal/session/scrollback.go:70-78`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** Copies 10MB buffer → string → split. ~30-40MB transient allocs.
 - **Fix:** Work on byte buffer directly to find last N newlines.
 
 ### 16. SQLite opened without timeout/WAL
 
 - **File:** `internal/engine/agent_status.go:82`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** Can block indefinitely if another process holds the lock.
 - **Fix:** Add `?_journal_mode=WAL&_busy_timeout=1000&mode=ro` to connection string.
 
 ### 17. `NormalizeOptions` called on every keypress/render
 
 - **File:** `internal/tui/model_core.go`, `internal/tui/keys.go`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** Wasteful repeated allocations on hot path.
 - **Fix:** Normalize once in constructor and after mutations, cache result.
 
 ### 18. `highlightMatch` byte offset bug with Unicode
 
 - **File:** `internal/tui/model_view.go:1060`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** Uses byte offset from lowercased string to slice original. Multi-byte runes garble display.
 - **Fix:** Use `strings.EqualFold` or rune-based indices.
 
 ### 19. JSONL partial line after seek
 
 - **File:** `internal/engine/agent_status.go:858`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** After seeking mid-file, first partial line is parsed and silently fails.
 - **Fix:** Skip bytes until first newline after seeking.
 
 ### 20. Fragile duplicated field copy (30+ fields)
 
 - **File:** `internal/tui/model_core.go:444-479,513-547`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** Two near-identical 30+ field copies. New `Session` field requires updating both.
 - **Fix:** Extract a merge helper method.
 
 ### 21. `suggestSessionName` unbounded loop
 
 - **File:** `main.go:345`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** `for i := 2; ; i++` with no upper bound. Tiny `maxLen` → infinite loop.
 - **Fix:** Add iteration cap (e.g. 10000) and return error.
 
 ### 22. Multiple `TagKill` handlers race redundantly
 
 - **File:** `internal/session/daemon.go:314`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** Multiple clients send `TagKill` simultaneously, each sleeping 500ms and signaling.
 - **Fix:** Use `sync.Once` for the kill sequence.
 
@@ -179,7 +179,7 @@ Reviewed: 2026-03-21
 ### 24. Dead code — unreachable type switch cases
 
 - **File:** `main.go:1096`
-- **Status:** [ ] TODO
+- **Status:** [x] DONE
 - **Issue:** `json.Unmarshal` into `any` never produces `int`/`int64`. Those cases are dead code.
 - **Fix:** Remove `int` and `int64` cases.
 

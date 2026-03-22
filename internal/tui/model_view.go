@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -1059,12 +1060,28 @@ func truncate(s string, maxLen int) string {
 // match of query using hlStyle.
 func highlightMatch(s, query string, base, hlStyle lipgloss.Style) string {
 	lower := strings.ToLower(s)
-	idx := strings.Index(lower, strings.ToLower(query))
+	lowerQuery := strings.ToLower(query)
+	idx := strings.Index(lower, lowerQuery)
 	if idx < 0 {
 		return base.Render(s)
 	}
-	end := idx + len(query)
-	return base.Render(s[:idx]) + hlStyle.Render(s[idx:end]) + base.Render(s[end:])
+	// Convert byte offsets in lowered string to rune offsets,
+	// then back to byte offsets in the original string.
+	runeStart := utf8.RuneCountInString(lower[:idx])
+	runeLen := utf8.RuneCountInString(lowerQuery)
+
+	byteStart := 0
+	for i := 0; i < runeStart; i++ {
+		_, size := utf8.DecodeRuneInString(s[byteStart:])
+		byteStart += size
+	}
+	byteEnd := byteStart
+	for i := 0; i < runeLen; i++ {
+		_, size := utf8.DecodeRuneInString(s[byteEnd:])
+		byteEnd += size
+	}
+
+	return base.Render(s[:byteStart]) + hlStyle.Render(s[byteStart:byteEnd]) + base.Render(s[byteEnd:])
 }
 
 func padLeft(s string, width int) string {

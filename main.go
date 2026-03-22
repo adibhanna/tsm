@@ -350,7 +350,7 @@ func suggestSessionName(cfg session.Config, sessions []session.Session) (string,
 		return base, nil
 	}
 
-	for i := 2; ; i++ {
+	for i := 2; i < 10000; i++ {
 		suffix := fmt.Sprintf("-%d", i)
 		candidate := truncateSessionName(base, maxLen-len(suffix)) + suffix
 		if candidate == suffix {
@@ -361,6 +361,7 @@ func suggestSessionName(cfg session.Config, sessions []session.Session) (string,
 			return candidate, nil
 		}
 	}
+	return "", fmt.Errorf("could not generate unique session name")
 }
 
 func socketPathAvailable(cfg session.Config, name string) bool {
@@ -1122,10 +1123,6 @@ func formatClaudeStatuslinePercent(v any) string {
 	switch n := v.(type) {
 	case float64:
 		return fmt.Sprintf("%.0f%%", n)
-	case int:
-		return fmt.Sprintf("%d%%", n)
-	case int64:
-		return fmt.Sprintf("%d%%", n)
 	case json.Number:
 		f, err := n.Float64()
 		if err != nil {

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -79,7 +80,8 @@ func lookupCodexStatus(cwd string) agentStatus {
 		return agentStatus{}
 	}
 
-	db, err := sql.Open("sqlite3", dbPath)
+	dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=1000&mode=ro"
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return agentStatus{}
 	}
@@ -872,6 +874,34 @@ func tailJSONLLines(path string, maxBytes int64) []string {
 	}
 	if size > maxBytes {
 		_, _ = f.Seek(size-maxBytes, 0)
+		// Read and discard until the first newline to align to a line boundary.
+		br := bufio.NewReader(f)
+		_, _ = br.ReadBytes('\n')
+		data, err := ioReadAllFromReader(br)
+		if err != nil {
+			return nil
+		}
+		data = bytes.TrimSpace(data)
+		if len(data) == 0 {
+			return nil
+		}
+		scanner := bufio.NewScanner(bytes.NewReader(data))
+		const maxLine = 1024 * 1024
+		buf := make([]byte, 0, 64*1024)
+		scanner.Buffer(buf, maxLine)
+
+		var lines []string
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			lines = append(lines, line)
+		}
+		if scanner.Err() != nil && !errors.Is(scanner.Err(), bufio.ErrTooLong) {
+			return nil
+		}
+		return lines
 	}
 
 	data, err := ioReadAll(f)
@@ -905,6 +935,12 @@ func tailJSONLLines(path string, maxBytes int64) []string {
 func ioReadAll(f *os.File) ([]byte, error) {
 	var buf bytes.Buffer
 	_, err := buf.ReadFrom(f)
+	return buf.Bytes(), err
+}
+
+func ioReadAllFromReader(r io.Reader) ([]byte, error) {
+	var buf bytes.Buffer
+	_, err := buf.ReadFrom(r)
 	return buf.Bytes(), err
 }
 

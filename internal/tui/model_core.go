@@ -171,7 +171,8 @@ func refreshSpinnerCmd() tea.Cmd {
 // Model
 
 type Model struct {
-	options Options
+	options        Options
+	normalizedOpts Options // cached normalized options
 
 	sessions   []Session
 	cursor     int
@@ -217,8 +218,10 @@ type listMetrics struct {
 }
 
 func initialModel() Model {
+	normed := NormalizeOptions(Options{})
 	return Model{
-		options:           NormalizeOptions(Options{}),
+		options:           normed,
+		normalizedOpts:    normed,
 		selected:          make(map[string]bool),
 		sortAsc:           true,
 		visibleCacheDirty: true,
@@ -229,7 +232,9 @@ func initialModel() Model {
 func NewModel(opts ...Options) Model {
 	m := initialModel()
 	if len(opts) > 0 {
-		m.options = NormalizeOptions(opts[0])
+		normed := NormalizeOptions(opts[0])
+		m.options = normed
+		m.normalizedOpts = normed
 	}
 	return m
 }
@@ -239,15 +244,15 @@ func (m Model) AttachTarget() string {
 }
 
 func (m Model) Options() Options {
-	return NormalizeOptions(m.options)
+	return m.normalizedOpts
 }
 
 func (m Model) isSimplified() bool {
-	return NormalizeOptions(m.options).Mode == ModeSimplified
+	return m.normalizedOpts.Mode == ModeSimplified
 }
 
 func (m Model) keymap() Keymap {
-	return NormalizeOptions(m.options).Keymap
+	return m.normalizedOpts.Keymap
 }
 
 func (m Model) inlineFilterEnabled() bool {
@@ -255,7 +260,7 @@ func (m Model) inlineFilterEnabled() bool {
 }
 
 func (m Model) showHelp() bool {
-	return NormalizeOptions(m.options).ShowHelp
+	return m.normalizedOpts.ShowHelp
 }
 
 // visibleSessions returns sessions matching the current filter, sorted by sortMode.
@@ -381,6 +386,82 @@ func computeListMetrics(sessions []Session) listMetrics {
 	return metrics
 }
 
+// mergeProcessInfo copies process-info fields from info into dst,
+// preserving session metadata (Name, PID, Clients, etc.).
+func mergeProcessInfo(dst *Session, info engine.ProcessInfo) {
+	dst.Memory = info.Memory
+	dst.Uptime = info.Uptime
+	dst.AgentKind = info.AgentKind
+	dst.AgentState = info.AgentState
+	dst.AgentSummary = info.AgentSummary
+	dst.AgentUpdated = info.AgentUpdated
+	dst.AgentModel = info.AgentModel
+	dst.AgentVersion = info.AgentVersion
+	dst.AgentPrompt = info.AgentPrompt
+	dst.AgentPlan = info.AgentPlan
+	dst.AgentApproval = info.AgentApproval
+	dst.AgentSandbox = info.AgentSandbox
+	dst.AgentBranch = info.AgentBranch
+	dst.AgentGitSHA = info.AgentGitSHA
+	dst.AgentGitOrigin = info.AgentGitOrigin
+	dst.AgentName = info.AgentName
+	dst.AgentRole = info.AgentRole
+	dst.AgentMemory = info.AgentMemory
+	dst.AgentSessionID = info.AgentSessionID
+	dst.AgentSubagent = info.AgentSubagent
+	dst.AgentInput = info.AgentInput
+	dst.AgentOutput = info.AgentOutput
+	dst.AgentCached = info.AgentCached
+	dst.AgentTotal = info.AgentTotal
+	dst.AgentContext = info.AgentContext
+	dst.AgentCostUSD = info.AgentCostUSD
+	dst.AgentDurationMS = info.AgentDurationMS
+	dst.AgentAPIMS = info.AgentAPIMS
+	dst.AgentLinesAdded = info.AgentLinesAdded
+	dst.AgentLinesRemoved = info.AgentLinesRemoved
+	dst.AgentOutputStyle = info.AgentOutputStyle
+	dst.AgentProjectDir = info.AgentProjectDir
+	dst.AgentWorktreePath = info.AgentWorktreePath
+}
+
+// copyProcessInfoFromSession copies process-info fields from src into dst,
+// preserving session metadata (Name, PID, Clients, etc.).
+func copyProcessInfoFromSession(dst *Session, src Session) {
+	dst.Memory = src.Memory
+	dst.Uptime = src.Uptime
+	dst.AgentKind = src.AgentKind
+	dst.AgentState = src.AgentState
+	dst.AgentSummary = src.AgentSummary
+	dst.AgentUpdated = src.AgentUpdated
+	dst.AgentModel = src.AgentModel
+	dst.AgentVersion = src.AgentVersion
+	dst.AgentPrompt = src.AgentPrompt
+	dst.AgentPlan = src.AgentPlan
+	dst.AgentApproval = src.AgentApproval
+	dst.AgentSandbox = src.AgentSandbox
+	dst.AgentBranch = src.AgentBranch
+	dst.AgentGitSHA = src.AgentGitSHA
+	dst.AgentGitOrigin = src.AgentGitOrigin
+	dst.AgentName = src.AgentName
+	dst.AgentRole = src.AgentRole
+	dst.AgentMemory = src.AgentMemory
+	dst.AgentSessionID = src.AgentSessionID
+	dst.AgentSubagent = src.AgentSubagent
+	dst.AgentInput = src.AgentInput
+	dst.AgentOutput = src.AgentOutput
+	dst.AgentCached = src.AgentCached
+	dst.AgentTotal = src.AgentTotal
+	dst.AgentContext = src.AgentContext
+	dst.AgentCostUSD = src.AgentCostUSD
+	dst.AgentDurationMS = src.AgentDurationMS
+	dst.AgentAPIMS = src.AgentAPIMS
+	dst.AgentLinesAdded = src.AgentLinesAdded
+	dst.AgentLinesRemoved = src.AgentLinesRemoved
+	dst.AgentOutputStyle = src.AgentOutputStyle
+	dst.AgentProjectDir = src.AgentProjectDir
+	dst.AgentWorktreePath = src.AgentWorktreePath
+}
+
 func (m *Model) addLog(line string) {
 	ts := logDimStyle.Render(time.Now().Format("15:04:05"))
 	m.logLines = append(m.logLines, ts+" "+line)
@@ -450,39 +531,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		for i := range msg.sessions {
 			if prev, ok := prevByName[msg.sessions[i].Name]; ok {
-				msg.sessions[i].Memory = prev.Memory
-				msg.sessions[i].Uptime = prev.Uptime
-				msg.sessions[i].AgentKind = prev.AgentKind
-				msg.sessions[i].AgentState = prev.AgentState
-				msg.sessions[i].AgentSummary = prev.AgentSummary
-				msg.sessions[i].AgentUpdated = prev.AgentUpdated
-				msg.sessions[i].AgentModel = prev.AgentModel
-				msg.sessions[i].AgentVersion = prev.AgentVersion
-				msg.sessions[i].AgentPrompt = prev.AgentPrompt
-				msg.sessions[i].AgentPlan = prev.AgentPlan
-				msg.sessions[i].AgentApproval = prev.AgentApproval
-				msg.sessions[i].AgentSandbox = prev.AgentSandbox
-				msg.sessions[i].AgentBranch = prev.AgentBranch
-				msg.sessions[i].AgentGitSHA = prev.AgentGitSHA
-				msg.sessions[i].AgentGitOrigin = prev.AgentGitOrigin
-				msg.sessions[i].AgentName = prev.AgentName
-				msg.sessions[i].AgentRole = prev.AgentRole
-				msg.sessions[i].AgentMemory = prev.AgentMemory
-				msg.sessions[i].AgentSessionID = prev.AgentSessionID
-				msg.sessions[i].AgentSubagent = prev.AgentSubagent
-				msg.sessions[i].AgentInput = prev.AgentInput
-				msg.sessions[i].AgentOutput = prev.AgentOutput
-				msg.sessions[i].AgentCached = prev.AgentCached
-				msg.sessions[i].AgentTotal = prev.AgentTotal
-				msg.sessions[i].AgentContext = prev.AgentContext
-				msg.sessions[i].AgentCostUSD = prev.AgentCostUSD
-				msg.sessions[i].AgentDurationMS = prev.AgentDurationMS
-				msg.sessions[i].AgentAPIMS = prev.AgentAPIMS
-				msg.sessions[i].AgentLinesAdded = prev.AgentLinesAdded
-				msg.sessions[i].AgentLinesRemoved = prev.AgentLinesRemoved
-				msg.sessions[i].AgentOutputStyle = prev.AgentOutputStyle
-				msg.sessions[i].AgentProjectDir = prev.AgentProjectDir
-				msg.sessions[i].AgentWorktreePath = prev.AgentWorktreePath
+				copyProcessInfoFromSession(&msg.sessions[i], prev)
 			}
 		}
 		m.sessions = msg.sessions
@@ -518,39 +567,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated := false
 		for i := range m.sessions {
 			if info, ok := msg.info[m.sessions[i].Name]; ok {
-				m.sessions[i].Memory = info.Memory
-				m.sessions[i].Uptime = info.Uptime
-				m.sessions[i].AgentKind = info.AgentKind
-				m.sessions[i].AgentState = info.AgentState
-				m.sessions[i].AgentSummary = info.AgentSummary
-				m.sessions[i].AgentUpdated = info.AgentUpdated
-				m.sessions[i].AgentModel = info.AgentModel
-				m.sessions[i].AgentVersion = info.AgentVersion
-				m.sessions[i].AgentPrompt = info.AgentPrompt
-				m.sessions[i].AgentPlan = info.AgentPlan
-				m.sessions[i].AgentApproval = info.AgentApproval
-				m.sessions[i].AgentSandbox = info.AgentSandbox
-				m.sessions[i].AgentBranch = info.AgentBranch
-				m.sessions[i].AgentGitSHA = info.AgentGitSHA
-				m.sessions[i].AgentGitOrigin = info.AgentGitOrigin
-				m.sessions[i].AgentName = info.AgentName
-				m.sessions[i].AgentRole = info.AgentRole
-				m.sessions[i].AgentMemory = info.AgentMemory
-				m.sessions[i].AgentSessionID = info.AgentSessionID
-				m.sessions[i].AgentSubagent = info.AgentSubagent
-				m.sessions[i].AgentInput = info.AgentInput
-				m.sessions[i].AgentOutput = info.AgentOutput
-				m.sessions[i].AgentCached = info.AgentCached
-				m.sessions[i].AgentTotal = info.AgentTotal
-				m.sessions[i].AgentContext = info.AgentContext
-				m.sessions[i].AgentCostUSD = info.AgentCostUSD
-				m.sessions[i].AgentDurationMS = info.AgentDurationMS
-				m.sessions[i].AgentAPIMS = info.AgentAPIMS
-				m.sessions[i].AgentLinesAdded = info.AgentLinesAdded
-				m.sessions[i].AgentLinesRemoved = info.AgentLinesRemoved
-				m.sessions[i].AgentOutputStyle = info.AgentOutputStyle
-				m.sessions[i].AgentProjectDir = info.AgentProjectDir
-				m.sessions[i].AgentWorktreePath = info.AgentWorktreePath
+				mergeProcessInfo(&m.sessions[i], info)
 				updated = true
 			}
 		}
@@ -670,13 +687,14 @@ func (m *Model) actionTargets() []string {
 }
 
 func (m *Model) toggleLayout() tea.Cmd {
-	opts := NormalizeOptions(m.options)
+	opts := m.normalizedOpts
 	if opts.Mode == ModeSimplified {
 		opts.Mode = ModeFull
 	} else {
 		opts.Mode = ModeSimplified
 	}
 	m.options = opts
+	m.normalizedOpts = NormalizeOptions(opts)
 	if m.isSimplified() {
 		m.preview = ""
 		return nil

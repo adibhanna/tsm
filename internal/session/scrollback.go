@@ -1,7 +1,6 @@
 package session
 
 import (
-	"strings"
 	"sync"
 )
 
@@ -69,10 +68,25 @@ func (s *Scrollback) Bytes() []byte {
 // TailLines returns the last n lines from the buffer.
 func (s *Scrollback) TailLines(n int) string {
 	data := s.Bytes()
-	str := string(data)
-	lines := strings.Split(str, "\n")
-	if len(lines) <= n {
-		return str
+
+	if len(data) == 0 || n <= 0 {
+		return ""
 	}
-	return strings.Join(lines[len(lines)-n:], "\n")
+
+	// Scan backwards to find the start of the last n lines.
+	count := 0
+	i := len(data) - 1
+	// Skip trailing newline if present.
+	if data[i] == '\n' {
+		i--
+	}
+	for ; i >= 0; i-- {
+		if data[i] == '\n' {
+			count++
+			if count >= n {
+				return string(data[i+1:])
+			}
+		}
+	}
+	return string(data)
 }

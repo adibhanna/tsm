@@ -15,7 +15,7 @@ func (m Model) actionLabel(action Action) string {
 }
 
 func (m Model) bindings() Bindings {
-	return NormalizeOptions(m.options).Bindings
+	return m.normalizedOpts.Bindings
 }
 
 func (m Model) isQuitKey(msg tea.KeyPressMsg) bool {

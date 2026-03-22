@@ -48,6 +48,7 @@ type Daemon struct {
 
 	done     chan struct{}
 	doneOnce sync.Once
+	killOnce sync.Once
 
 	sessionNameFile string
 }
@@ -244,9 +245,14 @@ func (d *Daemon) acceptLoop() {
 func (d *Daemon) handleClient(conn net.Conn) {
 	defer func() {
 		d.mu.Lock()
-		delete(d.clients, conn)
+		_, ok := d.clients[conn]
+		if ok {
+			delete(d.clients, conn)
+		}
 		d.mu.Unlock()
-		conn.Close()
+		if ok {
+			conn.Close()
+		}
 	}()
 
 	for {
@@ -320,9 +326,11 @@ func (d *Daemon) handleClient(conn net.Conn) {
 
 		case TagKill:
 			d.doneOnce.Do(func() { close(d.done) })
-			d.cmd.Process.Signal(syscall.SIGHUP)
-			time.Sleep(500 * time.Millisecond)
-			d.cmd.Process.Signal(syscall.SIGKILL)
+			d.killOnce.Do(func() {
+				d.cmd.Process.Signal(syscall.SIGHUP)
+				time.Sleep(500 * time.Millisecond)
+				d.cmd.Process.Signal(syscall.SIGKILL)
+			})
 			return
 
 		case TagDetach:

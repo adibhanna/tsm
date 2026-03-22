@@ -18,7 +18,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
-	m.handleLogScroll(msg)
+	if m.handleLogScroll(msg) {
+		return m, nil
+	}
 
 	if m.inlineFilterEnabled() {
 		if msg.Code == tea.KeyEscape {
@@ -413,12 +415,12 @@ func (m Model) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleLogScroll(msg tea.KeyPressMsg) {
+func (m *Model) handleLogScroll(msg tea.KeyPressMsg) bool {
 	if m.isSimplified() {
-		return
+		return false
 	}
 	if !m.matchesAction(ActionLogUp, msg) && !m.matchesAction(ActionLogDown, msg) {
-		return
+		return false
 	}
 	maxOffset := len(m.logLines) - logContentHeight
 	if maxOffset < 0 {
@@ -430,6 +432,7 @@ func (m *Model) handleLogScroll(msg tea.KeyPressMsg) {
 	if m.matchesAction(ActionLogDown, msg) && m.logOffset < maxOffset {
 		m.logOffset++
 	}
+	return true
 }
 
 func (m *Model) ensureVisible() {
