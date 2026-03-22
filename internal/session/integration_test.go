@@ -338,6 +338,9 @@ func TestIntegrationFullScreenRestore(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	if RestoreBackendName() == "stub" {
+		t.Skip("requires cgo (libghostty-vt)")
+	}
 	cfg := testConfig(t)
 	errCh := startTestDaemon(t, cfg, "altscreen", []string{
 		"sh", "-c", "printf '\\033[?1049h'; echo in-alt-screen; exec sleep 30",

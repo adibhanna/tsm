@@ -45,7 +45,20 @@ func TestFetchProcessInfoIncludesAgentStatus(t *testing.T) {
 	}
 }
 
+func requireCGO(t *testing.T) {
+	t.Helper()
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Skip("requires cgo (go-sqlite3)")
+	}
+	defer db.Close()
+	if err := db.Ping(); err != nil {
+		t.Skip("requires cgo (go-sqlite3)")
+	}
+}
+
 func TestLookupCodexStatusFromLocalState(t *testing.T) {
+	requireCGO(t)
 	home := t.TempDir()
 	origHome := agentUserHomeDir
 	defer func() { agentUserHomeDir = origHome }()

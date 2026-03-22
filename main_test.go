@@ -675,6 +675,9 @@ func TestDoctorReportOrphanedArtifacts(t *testing.T) {
 }
 
 func TestDoctorReportMissingPkgConfig(t *testing.T) {
+	if session.RestoreBackendName() == "stub" {
+		t.Skip("requires cgo (libghostty-vt)")
+	}
 	socketDir := t.TempDir()
 	t.Setenv("TSM_DIR", socketDir)
 

@@ -462,7 +462,7 @@ func TestSessionsRefreshPreservesSelectedAgentMetadata(t *testing.T) {
 	}
 
 	view := stripStyleCodes(got.View().Content)
-	if !strings.Contains(view, "claude") || !strings.Contains(view, "Here are the files") {
+	if !strings.Contains(view, "Claude") || !strings.Contains(view, "Here are the files") {
 		t.Fatalf("full view should keep agent pane during sessions refresh: %q", view)
 	}
 }
@@ -482,7 +482,7 @@ func TestSimplifiedViewShowsSelectedAgentStatus(t *testing.T) {
 	m.markSessionsChanged()
 
 	view := stripStyleCodes(m.View().Content)
-	if !strings.Contains(view, "codex") || !strings.Contains(view, "exec: make test") {
+	if !strings.Contains(view, "Codex") || !strings.Contains(view, "exec: make test") {
 		t.Fatalf("simplified view missing agent status: %q", view)
 	}
 }
@@ -543,7 +543,7 @@ func TestFullViewShowsSelectedAgentStatus(t *testing.T) {
 	m.markSessionsChanged()
 
 	view := stripStyleCodes(m.View().Content)
-	if !strings.Contains(view, "claude") || !strings.Contains(view, "Here are the files") {
+	if !strings.Contains(view, "Claude") || !strings.Contains(view, "Here are the files") {
 		t.Fatalf("full view missing agent status: %q", view)
 	}
 	if !strings.Contains(view, "overview") || !strings.Contains(view, "branch: main") || !strings.Contains(view, "agent: keen-dawn (subagent)") {
