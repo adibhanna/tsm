@@ -72,5 +72,9 @@ func (c Config) MaxSessionNameLen() int {
 	if runtime.GOOS == "darwin" {
 		limit = 104
 	}
-	return limit - len(c.SocketDir) - 1 // -1 for the "/" separator
+	n := limit - len(c.SocketDir) - 1 // -1 for the "/" separator
+	if n < 0 {
+		return 0
+	}
+	return n
 }

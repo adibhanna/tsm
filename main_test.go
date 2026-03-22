@@ -23,14 +23,7 @@ func TestSuggestSessionNameUsesCurrentDirectory(t *testing.T) {
 	if err := os.MkdirAll(workdir, 0750); err != nil {
 		t.Fatalf("mkdir workdir: %v", err)
 	}
-	prev, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	defer os.Chdir(prev)
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	t.Chdir(workdir)
 
 	cfg := session.DefaultConfig()
 	name, err := suggestSessionName(cfg, nil)
@@ -48,14 +41,7 @@ func TestSuggestSessionNameAddsSuffixForCollisions(t *testing.T) {
 	if err := os.MkdirAll(workdir, 0750); err != nil {
 		t.Fatalf("mkdir workdir: %v", err)
 	}
-	prev, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	defer os.Chdir(prev)
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	t.Chdir(workdir)
 
 	cfg := session.DefaultConfig()
 	sessions := []session.Session{{Name: "demo"}, {Name: "demo-2"}}
@@ -74,14 +60,7 @@ func TestSuggestSessionNameSkipsExistingSocketPathConflicts(t *testing.T) {
 	if err := os.MkdirAll(workdir, 0750); err != nil {
 		t.Fatalf("mkdir workdir: %v", err)
 	}
-	prev, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	defer os.Chdir(prev)
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	t.Chdir(workdir)
 
 	cfg := session.Config{SocketDir: dir}
 	name, err := suggestSessionName(cfg, nil)

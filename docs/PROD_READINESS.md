@@ -190,27 +190,34 @@ Reviewed: 2026-03-21
 ### 25. Detach key `0x1C` false positive on binary data
 
 - **File:** `internal/session/client.go:25`
+- **Status:** WONTFIX — inherent design tradeoff for in-band detach signaling
 
 ### 26. Stale socket cleanup only handles `*net.OpError`
 
 - **File:** `internal/session/session.go:91`
+- **Status:** [x] DONE
 
 ### 27. `MaxSessionNameLen` can return negative
 
 - **File:** `internal/session/config.go:50`
+- **Status:** [x] DONE
 
 ### 28. `displayAgentKind` misuses `DisplayAgentModel`
 
 - **File:** `internal/tui/model_view.go:784`
+- **Status:** [x] DONE
 
 ### 29. `removeFocusSession` stale `Current` when `Current == Previous`
 
 - **File:** `focus.go:71`
+- **Status:** [x] DONE
 
 ### 30. `os.Chdir` in tests not parallel-safe
 
 - **File:** `main_test.go:20`
+- **Status:** [x] DONE
 
 ### 31. `TestCLITUIAttach` permanently skipped
 
 - **File:** `cli_integration_test.go:433`
+- **Status:** [x] DONE

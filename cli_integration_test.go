@@ -430,10 +430,6 @@ func TestCLICommandExitTerminalRecovery(t *testing.T) {
 //
 // I/O relay and Ctrl+\ detach through the re-exec'd attach are covered
 // by TestCLIAttachDetachReattach which tests the direct attach path.
-func TestCLITUIAttach(t *testing.T) {
-	t.Skip("skipping: full TUI attach flow is flaky in CI PTY environment")
-}
-
 // TestCLIPaletteAttach verifies the simplified palette → attach flow:
 // tsm palette renders sessions, Enter selects, runAttachTarget re-execs
 // into tsm attach, and the process enters the attached state.

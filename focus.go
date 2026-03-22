@@ -82,6 +82,10 @@ func removeFocusSession(cfg session.Config, name string) error {
 		state.Previous = ""
 		changed = true
 	}
+	// Check again — Current may still equal name if Previous was also name.
+	if state.Current == name {
+		state.Current = ""
+	}
 	if state.Previous == name {
 		state.Previous = ""
 		changed = true

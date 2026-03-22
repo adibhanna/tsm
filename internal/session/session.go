@@ -3,7 +3,6 @@ package session
 import (
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -87,11 +86,8 @@ func ListSessions(cfg Config) ([]Session, error) {
 
 		info, err := ProbeSession(path)
 		if err != nil {
-			// Connection refused means the daemon is dead — clean up the stale socket.
-			var opErr *net.OpError
-			if errors.As(err, &opErr) {
-				CleanStaleSocket(path)
-			}
+			// Connection failed — daemon is likely dead. Clean up the stale socket.
+			CleanStaleSocket(path)
 			continue
 		}
 

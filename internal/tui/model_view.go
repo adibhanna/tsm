@@ -783,7 +783,10 @@ func formatMillis(ms int64) string {
 }
 
 func displayAgentKind(kind string) string {
-	return engine.DisplayAgentModel("", kind)
+	if kind == "" {
+		return ""
+	}
+	return strings.ToUpper(kind[:1]) + kind[1:]
 }
 
 func (m Model) renderStatus() string {
