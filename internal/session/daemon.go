@@ -392,10 +392,19 @@ func (d *Daemon) renameSession(newName string) error {
 
 func (d *Daemon) broadcast(tag Tag, data []byte) {
 	msg := MarshalMessage(tag, data)
-	for _, client := range d.snapshotClients() {
-		if !client.state.attached {
-			continue
+
+	// Read attached flag while holding the lock to avoid a data race
+	// with markClientAttached.
+	d.mu.RLock()
+	attached := make([]clientSnapshot, 0, len(d.clients))
+	for conn, state := range d.clients {
+		if state.attached {
+			attached = append(attached, clientSnapshot{conn: conn, state: state})
 		}
+	}
+	d.mu.RUnlock()
+
+	for _, client := range attached {
 		client.state.writeMessage(client.conn, msg, 100*time.Millisecond)
 	}
 }
