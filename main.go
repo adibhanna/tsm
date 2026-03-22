@@ -46,6 +46,10 @@ func main() {
 	// Internal daemon mode — not user-facing.
 	if len(os.Args) > 2 && os.Args[1] == "--daemon" {
 		name := os.Args[2]
+		if err := session.ValidateSessionName(name); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 		shellCmd := os.Args[3:]
 		if err := session.StartDaemon(name, shellCmd); err != nil {
 			fmt.Fprintf(os.Stderr, "daemon error: %v\n", err)
@@ -158,6 +162,10 @@ func cmdAttach() {
 	}
 
 	name := os.Args[2]
+	if err := session.ValidateSessionName(name); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 	if switched := emitLocalSwitchRequest(name); switched {
 		return
 	}
@@ -380,6 +388,10 @@ func cmdNew() {
 		os.Exit(1)
 	}
 	name := os.Args[2]
+	if err := session.ValidateSessionName(name); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 	shellCmd := os.Args[3:]
 
 	if err := session.SpawnDaemon(name, shellCmd); err != nil {
@@ -507,6 +519,14 @@ func cmdRename() {
 	}
 	oldName := os.Args[2]
 	newName := os.Args[3]
+	if err := session.ValidateSessionName(oldName); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: invalid old name: %v\n", err)
+		os.Exit(1)
+	}
+	if err := session.ValidateSessionName(newName); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: invalid new name: %v\n", err)
+		os.Exit(1)
+	}
 	cfg := session.DefaultConfig()
 
 	if err := session.RenameSession(cfg, oldName, newName); err != nil {
@@ -527,6 +547,11 @@ func cmdKill() {
 
 	var failed bool
 	for _, name := range targets {
+		if err := session.ValidateSessionName(name); err != nil {
+			fmt.Fprintln(os.Stderr, formatSessionActionError("kill", name, err))
+			failed = true
+			continue
+		}
 		if err := session.KillSession(cfg, name); err != nil {
 			fmt.Fprintln(os.Stderr, formatSessionActionError("kill", name, err))
 			failed = true

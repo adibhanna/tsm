@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -58,13 +59,13 @@ func Attach(cfg Config, name string) error {
 	if err != nil {
 		return fmt.Errorf("raw mode: %w", err)
 	}
-	var switchErr *SwitchSessionError
+	var switchErr atomic.Pointer[SwitchSessionError]
 	defer func() {
 		term.Restore(int(os.Stdin.Fd()), oldState)
 		// Reset terminal modes that the session may have enabled. When we're
 		// about to switch directly into another attach, avoid the full clear so
 		// we don't flash the previous screen right before the new session takes over.
-		os.Stdout.WriteString(exitSeqForSwitch(switchErr != nil))
+		os.Stdout.WriteString(exitSeqForSwitch(switchErr.Load() != nil))
 	}()
 
 	// Ignore SIGQUIT so Ctrl+\ doesn't kill us — we use it to detach.
@@ -94,7 +95,6 @@ func Attach(cfg Config, name string) error {
 		defer closeDone()
 		var filter outputFilter
 		for {
-			conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 			tag, payload, err := ReadMessage(conn, 1*time.Second)
 			if err != nil {
 				var netErr net.Error
@@ -114,7 +114,7 @@ func Attach(cfg Config, name string) error {
 					os.Stdout.Write(filtered)
 				}
 				if target != "" {
-					switchErr = &SwitchSessionError{Target: target}
+					switchErr.Store(&SwitchSessionError{Target: target})
 					return
 				}
 			}
@@ -153,8 +153,8 @@ func Attach(cfg Config, name string) error {
 	}()
 
 	<-done
-	if switchErr != nil {
-		return switchErr
+	if se := switchErr.Load(); se != nil {
+		return se
 	}
 	return nil
 }

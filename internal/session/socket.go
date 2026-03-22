@@ -40,6 +40,10 @@ func ReadMessage(conn net.Conn, timeout time.Duration) (Tag, []byte, error) {
 		return 0, nil, err
 	}
 
+	if hdr.Len > MaxPayloadSize {
+		return 0, nil, fmt.Errorf("payload too large: %d bytes (max %d)", hdr.Len, MaxPayloadSize)
+	}
+
 	if hdr.Len == 0 {
 		return hdr.Tag, nil, nil
 	}

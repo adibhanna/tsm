@@ -1,7 +1,9 @@
 package session
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -43,6 +45,23 @@ func DefaultConfig() Config {
 // SocketPath returns the full path to a session's Unix domain socket.
 func (c Config) SocketPath(name string) string {
 	return c.SocketDir + "/" + name
+}
+
+// ValidateSessionName checks that a session name is safe for use in file paths.
+func ValidateSessionName(name string) error {
+	if name == "" {
+		return fmt.Errorf("session name must not be empty")
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, string(filepath.Separator)) {
+		return fmt.Errorf("session name must not contain path separators")
+	}
+	if strings.Contains(name, "\x00") {
+		return fmt.Errorf("session name must not contain null bytes")
+	}
+	if name == "." || name == ".." || strings.HasPrefix(name, "..") {
+		return fmt.Errorf("session name must not be or start with '..'")
+	}
+	return nil
 }
 
 // MaxSessionNameLen returns the maximum session name length based on

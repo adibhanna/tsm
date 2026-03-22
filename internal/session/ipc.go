@@ -6,9 +6,10 @@ import (
 )
 
 const (
-	HeaderSize = 5
-	MaxCmdLen  = 256
-	MaxCwdLen  = 256
+	HeaderSize     = 5
+	MaxCmdLen      = 256
+	MaxCwdLen      = 256
+	MaxPayloadSize = 16 * 1024 * 1024 // 16 MB
 
 	// InfoSize is the size of the IPC Info extern struct on 64-bit platforms.
 	// Layout: clients_len(8) + pid(4) + cmd_len(2) + cwd_len(2) +
