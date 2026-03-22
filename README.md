@@ -1,5 +1,9 @@
 # tsm
 
+<p align="center">
+  <img src="assets/tsm.png" alt="tsm logo" width="200">
+</p>
+
 `tsm` is a terminal session manager. It keeps shell sessions alive as background daemons, lets you detach and reattach later, and restores terminal state without turning the project into a tmux clone.
 
 It is built around a simple model:
