@@ -49,10 +49,10 @@ func (b *Backend) ListWorkspaces() ([]mux.Workspace, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list windows: %w", err)
 	}
-	ids := parseIDList(out)
+	ids := parseStringList(out)
 	var ws []mux.Workspace
 	for _, id := range ids {
-		name, _ := osascript(fmt.Sprintf(`tell application "Ghostty" to get name of window id %s`, id))
+		name, _ := osascript(fmt.Sprintf(`tell application "Ghostty" to get name of window id "%s"`, id))
 		name = strings.TrimSpace(name)
 		if name == "" {
 			name = "window-" + id
@@ -63,7 +63,6 @@ func (b *Backend) ListWorkspaces() ([]mux.Workspace, error) {
 }
 
 func (b *Backend) CreateWorkspace(name string) (mux.Workspace, error) {
-	// Create a new window. AppleScript returns the new window object.
 	out, err := osascript(`tell application "Ghostty"
 		set newWin to new window
 		return id of newWin
@@ -76,9 +75,10 @@ func (b *Backend) CreateWorkspace(name string) (mux.Workspace, error) {
 }
 
 func (b *Backend) SelectWorkspace(id string) error {
-	_, err := osascript(fmt.Sprintf(`tell application "Ghostty" to activate window id %s`, id))
+	_, err := osascript(fmt.Sprintf(`tell application "Ghostty" to activate window id "%s"`, id))
 	if err != nil {
-		return fmt.Errorf("activate window: %w", err)
+		// Fallback: just bring Ghostty to front.
+		_, _ = osascript(`tell application "Ghostty" to activate`)
 	}
 	return nil
 }
@@ -86,15 +86,17 @@ func (b *Backend) SelectWorkspace(id string) error {
 // --- Surfaces (Ghostty tabs) ---
 
 func (b *Backend) CreateSurface(workspaceID string) (mux.Surface, error) {
-	script := `tell application "Ghostty"
-		set newTab to new tab in front window
-		return id of focused terminal of newTab
-	end tell`
+	var script string
 	if workspaceID != "" {
 		script = fmt.Sprintf(`tell application "Ghostty"
-			set newTab to new tab in window id %s
+			set newTab to new tab in window id "%s"
 			return id of focused terminal of newTab
 		end tell`, workspaceID)
+	} else {
+		script = `tell application "Ghostty"
+			set newTab to new tab in front window
+			return id of focused terminal of newTab
+		end tell`
 	}
 	out, err := osascript(script)
 	if err != nil {
@@ -105,9 +107,10 @@ func (b *Backend) CreateSurface(workspaceID string) (mux.Surface, error) {
 }
 
 func (b *Backend) CloseSurface(id string) error {
-	_, err := osascript(fmt.Sprintf(`tell application "Ghostty" to close tab of terminal id %s`, id))
+	// Close the tab containing this terminal.
+	_, err := osascript(fmt.Sprintf(`tell application "Ghostty" to close terminal id "%s"`, id))
 	if err != nil {
-		return fmt.Errorf("close tab: %w", err)
+		return fmt.Errorf("close surface: %w", err)
 	}
 	return nil
 }
@@ -130,7 +133,7 @@ func (b *Backend) SplitPane(workspaceID string, dir mux.Direction) (mux.Pane, er
 }
 
 func (b *Backend) ClosePane(id string) error {
-	_, err := osascript(fmt.Sprintf(`tell application "Ghostty" to close terminal id %s`, id))
+	_, err := osascript(fmt.Sprintf(`tell application "Ghostty" to close terminal id "%s"`, id))
 	if err != nil {
 		return fmt.Errorf("close terminal: %w", err)
 	}
@@ -138,7 +141,7 @@ func (b *Backend) ClosePane(id string) error {
 }
 
 func (b *Backend) FocusPane(id string) error {
-	_, err := osascript(fmt.Sprintf(`tell application "Ghostty" to focus terminal id %s`, id))
+	_, err := osascript(fmt.Sprintf(`tell application "Ghostty" to focus terminal id "%s"`, id))
 	if err != nil {
 		return fmt.Errorf("focus terminal: %w", err)
 	}
@@ -157,11 +160,10 @@ func (b *Backend) GetFocusedPane() (mux.Pane, error) {
 // --- I/O ---
 
 func (b *Backend) SendText(paneID string, text string) error {
-	// Escape text for AppleScript string.
 	escaped := escapeAppleScript(text)
 	var script string
 	if paneID != "" {
-		script = fmt.Sprintf(`tell application "Ghostty" to input text %s to terminal id %s`, escaped, paneID)
+		script = fmt.Sprintf(`tell application "Ghostty" to input text %s to terminal id "%s"`, escaped, paneID)
 	} else {
 		script = fmt.Sprintf(`tell application "Ghostty" to input text %s to focused terminal of selected tab of front window`, escaped)
 	}
@@ -173,16 +175,14 @@ func (b *Backend) SendText(paneID string, text string) error {
 }
 
 func (b *Backend) SendTextToWorkspace(workspaceID, surfaceID, text string) error {
-	// surfaceID is a terminal ID in Ghostty.
 	escaped := escapeAppleScript(text)
 	var script string
 	if surfaceID != "" {
-		script = fmt.Sprintf(`tell application "Ghostty" to input text %s to terminal id %s`, escaped, surfaceID)
+		script = fmt.Sprintf(`tell application "Ghostty" to input text %s to terminal id "%s"`, escaped, surfaceID)
+	} else if workspaceID != "" {
+		script = fmt.Sprintf(`tell application "Ghostty" to input text %s to focused terminal of selected tab of window id "%s"`, escaped, workspaceID)
 	} else {
-		script = fmt.Sprintf(`tell application "Ghostty"
-			activate window id %s
-			input text %s to focused terminal of selected tab of window id %s
-		end tell`, workspaceID, escaped, workspaceID)
+		script = fmt.Sprintf(`tell application "Ghostty" to input text %s to focused terminal of selected tab of front window`, escaped)
 	}
 	_, err := osascript(script)
 	if err != nil {
@@ -192,21 +192,22 @@ func (b *Backend) SendTextToWorkspace(workspaceID, surfaceID, text string) error
 }
 
 func (b *Backend) ListPaneSurfaces(workspaceID string) ([]string, error) {
-	script := `tell application "Ghostty" to get id of every terminal of selected tab of front window`
+	var script string
 	if workspaceID != "" {
-		script = fmt.Sprintf(`tell application "Ghostty" to get id of every terminal of selected tab of window id %s`, workspaceID)
+		script = fmt.Sprintf(`tell application "Ghostty" to get id of every terminal of selected tab of window id "%s"`, workspaceID)
+	} else {
+		script = `tell application "Ghostty" to get id of every terminal of selected tab of front window`
 	}
 	out, err := osascript(script)
 	if err != nil {
 		return nil, fmt.Errorf("list terminals: %w", err)
 	}
-	return parseIDList(out), nil
+	return parseStringList(out), nil
 }
 
 // --- Screen ---
 
 func (b *Backend) ReadScreen(workspaceID, surfaceID string) (string, error) {
-	// Ghostty's AppleScript API doesn't expose terminal buffer contents.
 	return "", fmt.Errorf("read-screen not supported in Ghostty")
 }
 
@@ -254,9 +255,22 @@ func escapeAppleScript(s string) string {
 	return `"` + s + `"`
 }
 
-var idListRe = regexp.MustCompile(`\d+`)
+var idRe = regexp.MustCompile(`[A-Za-z0-9_-]+`)
 
-// parseIDList parses AppleScript list output like "1, 2, 3" or "{1, 2, 3}" into string IDs.
-func parseIDList(s string) []string {
-	return idListRe.FindAllString(strings.TrimSpace(s), -1)
+// parseStringList parses AppleScript list output like "abc, def, ghi" into string IDs.
+// Ghostty IDs are UUIDs or opaque strings, not just numbers.
+func parseStringList(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ", ")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
