@@ -19,6 +19,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/adibhanna/tsm/internal/appconfig"
 	"github.com/adibhanna/tsm/internal/engine"
+	"github.com/adibhanna/tsm/internal/mux"
+	cmuxbackend "github.com/adibhanna/tsm/internal/mux/backend/cmux"
 	"github.com/adibhanna/tsm/internal/session"
 	"github.com/adibhanna/tsm/internal/tui"
 )
@@ -94,6 +96,8 @@ func main() {
 		cmdDebug()
 	case "claude-statusline":
 		cmdClaudeStatusline()
+	case "mux", "m":
+		cmdMux()
 	case "help", "h", "-h", "--help":
 		printUsage()
 	default:
@@ -991,6 +995,324 @@ func debugSessionReport(cfg session.Config, name string) (string, bool, error) {
 	return b.String(), true, nil
 }
 
+func cmdMux() {
+	if len(os.Args) < 3 {
+		printMuxUsage()
+		os.Exit(1)
+	}
+
+	sub := os.Args[2]
+	switch sub {
+	case "open":
+		cmdMuxOpen()
+	case "split":
+		cmdMuxSplit()
+	case "tab":
+		cmdMuxTab()
+	case "save":
+		cmdMuxSave()
+	case "restore":
+		cmdMuxRestore()
+	case "doctor":
+		cmdMuxDoctor()
+	case "sidebar":
+		cmdMuxSidebar()
+	case "status":
+		cmdMuxStatus()
+	case "help", "-h", "--help":
+		printMuxUsage()
+	default:
+		fmt.Fprintf(os.Stderr, "tsm mux: unknown subcommand %q\n", sub)
+		printMuxUsage()
+		os.Exit(1)
+	}
+}
+
+func cmdMuxOpen() {
+	if len(os.Args) < 4 {
+		fmt.Fprintln(os.Stderr, "usage: tsm mux open <workspace>")
+		os.Exit(1)
+	}
+	name := os.Args[3]
+
+	orch, err := newOrchestrator()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := orch.Open(name); err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening workspace %q: %v\n", name, err)
+		os.Exit(1)
+	}
+	fmt.Printf("Workspace %q opened\n", name)
+}
+
+func cmdMuxSplit() {
+	if len(os.Args) < 5 {
+		fmt.Fprintln(os.Stderr, "usage: tsm mux split <left|right|up|down> <session> [cmd...]")
+		os.Exit(1)
+	}
+	dirStr := os.Args[3]
+	dir, ok := mux.ParseDirection(dirStr)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "Error: invalid direction %q (use left, right, up, down)\n", dirStr)
+		os.Exit(1)
+	}
+	sessionName := os.Args[4]
+	cmd := os.Args[5:]
+
+	orch, err := newOrchestrator()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := orch.Split(dir, sessionName, cmd); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Split %s with session %q\n", dirStr, sessionName)
+}
+
+func cmdMuxTab() {
+	if len(os.Args) < 4 {
+		printMuxTabUsage()
+		os.Exit(1)
+	}
+	sub := os.Args[3]
+	switch sub {
+	case "new":
+		if len(os.Args) < 5 {
+			fmt.Fprintln(os.Stderr, "usage: tsm mux tab new <session> [cmd...]")
+			os.Exit(1)
+		}
+		sessionName := os.Args[4]
+		cmd := os.Args[5:]
+
+		orch, err := newOrchestrator()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		if err := orch.TabNew(sessionName, cmd); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("New tab with session %q\n", sessionName)
+	default:
+		fmt.Fprintf(os.Stderr, "tsm mux tab: unknown subcommand %q\n", sub)
+		printMuxTabUsage()
+		os.Exit(1)
+	}
+}
+
+func cmdMuxSave() {
+	name := ""
+	if len(os.Args) >= 4 {
+		name = os.Args[3]
+	}
+	if name == "" {
+		fmt.Fprintln(os.Stderr, "usage: tsm mux save <workspace>")
+		os.Exit(1)
+	}
+
+	// Save doesn't need cmux access — works from anywhere.
+	orch := &mux.Orchestrator{SessCfg: session.DefaultConfig()}
+	if err := orch.Save(name); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving workspace: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Workspace %q saved\n", name)
+}
+
+func cmdMuxRestore() {
+	if len(os.Args) < 4 {
+		fmt.Fprintln(os.Stderr, "usage: tsm mux restore <workspace>")
+		os.Exit(1)
+	}
+	name := os.Args[3]
+
+	orch, err := newOrchestrator()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := orch.Restore(name); err != nil {
+		fmt.Fprintf(os.Stderr, "Error restoring workspace %q: %v\n", name, err)
+		os.Exit(1)
+	}
+	fmt.Printf("Workspace %q restored\n", name)
+}
+
+func cmdMuxDoctor() {
+	name := ""
+	if len(os.Args) >= 4 {
+		name = os.Args[3]
+	}
+	if name == "" {
+		fmt.Fprintln(os.Stderr, "usage: tsm mux doctor <workspace>")
+		os.Exit(1)
+	}
+
+	// Doctor doesn't need cmux access — works from anywhere.
+	orch := &mux.Orchestrator{SessCfg: session.DefaultConfig()}
+	status, err := orch.Doctor(name)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Workspace: %s\n", status.WorkspaceName)
+	if status.HasManifest {
+		fmt.Printf("Manifest:  ~/.config/tsm/workspaces/%s.toml\n", status.WorkspaceName)
+	}
+	fmt.Printf("Sessions:  %d\n", len(status.Sessions))
+	for _, s := range status.Sessions {
+		state := "dead"
+		if s.Live {
+			state = fmt.Sprintf("live (clients=%d)", s.Clients)
+		}
+		fmt.Printf("  %s: %s\n", s.Name, state)
+	}
+}
+
+func cmdMuxSidebar() {
+	if len(os.Args) < 4 {
+		fmt.Fprintln(os.Stderr, "usage: tsm mux sidebar sync [workspace]")
+		os.Exit(1)
+	}
+	sub := os.Args[3]
+	switch sub {
+	case "sync":
+		name := ""
+		if len(os.Args) >= 5 {
+			name = os.Args[4]
+		}
+		if name == "" {
+			fmt.Fprintln(os.Stderr, "usage: tsm mux sidebar sync <workspace>")
+			os.Exit(1)
+		}
+		orch, err := newOrchestrator()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		if err := mux.SidebarSync(orch.Backend, session.DefaultConfig(), name); err != nil {
+			fmt.Fprintf(os.Stderr, "Error syncing sidebar: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Sidebar synced for workspace %q\n", name)
+	default:
+		fmt.Fprintf(os.Stderr, "tsm mux sidebar: unknown subcommand %q\n", sub)
+		fmt.Fprintln(os.Stderr, "usage: tsm mux sidebar sync <workspace>")
+		os.Exit(1)
+	}
+}
+
+func cmdMuxStatus() {
+	term := mux.DetectTerminal()
+	fmt.Printf("Terminal: %s\n", term.Name)
+	if term.Backend != "" {
+		fmt.Printf("Backend:  %s\n", term.Backend)
+	} else {
+		fmt.Printf("Backend:  none (no split API available for %s)\n", term.Name)
+	}
+
+	orch, err := newOrchestrator()
+	if err != nil {
+		fmt.Printf("Status:   unavailable (%v)\n", err)
+	} else {
+		fmt.Printf("Status:   connected to %s\n", orch.Backend.Name())
+	}
+
+	manifests, err := mux.ListManifests()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error listing workspaces: %v\n", err)
+		os.Exit(1)
+	}
+	if len(manifests) == 0 {
+		fmt.Println("Workspaces: none")
+	} else {
+		fmt.Println("Workspaces:")
+		for _, m := range manifests {
+			fmt.Printf("  %s\n", m)
+		}
+	}
+}
+
+func newOrchestrator() (*mux.Orchestrator, error) {
+	// Check for explicit override via env var.
+	preferred := os.Getenv("TSM_MUX_BACKEND")
+
+	// Auto-detect from terminal environment if not set.
+	if preferred == "" {
+		term := mux.DetectTerminal()
+		preferred = term.Backend
+	}
+
+	var backend mux.Backend
+	switch preferred {
+	case "cmux":
+		backend = cmuxbackend.New()
+	default:
+		// Try cmux as fallback.
+		backend = cmuxbackend.New()
+	}
+
+	if !backend.Available() {
+		term := mux.DetectTerminal()
+		if term.Backend == "" {
+			return nil, fmt.Errorf("terminal %q has no split API; install cmux or use a supported terminal", term.Name)
+		}
+		// Try to get a specific reason from the backend.
+		if cb, ok := backend.(*cmuxbackend.Backend); ok {
+			if reason := cb.UnavailableReason(); reason != "" {
+				return nil, fmt.Errorf("%s", reason)
+			}
+		}
+		return nil, fmt.Errorf("mux backend %q not available (is %s running?)", preferred, preferred)
+	}
+	return &mux.Orchestrator{
+		Backend: backend,
+		SessCfg: session.DefaultConfig(),
+	}, nil
+}
+
+func printMuxUsage() {
+	fmt.Print(`tsm mux — native terminal multiplexer
+
+Usage:
+  tsm mux open <workspace>                        Open a workspace from manifest
+  tsm mux split <left|right|up|down> <session>     Split focused pane with session
+  tsm mux tab new <session> [cmd...]               New tab with session
+  tsm mux save <workspace>                          Save current workspace layout
+  tsm mux restore <workspace>                      Restore workspace from manifest
+  tsm mux doctor <workspace>                       Diagnose workspace health
+  tsm mux sidebar sync <workspace>                 Sync session state to cmux sidebar
+  tsm mux status                                   Show terminal, backend, and workspace info
+  tsm mux help                                     Show this help
+
+Workspaces are defined as TOML manifests in ~/.config/tsm/workspaces/
+
+Env:
+  TSM_MUX_BACKEND    Override backend (e.g. "cmux")
+
+Aliases:
+  mux=m
+`)
+}
+
+func printMuxTabUsage() {
+	fmt.Print(`tsm mux tab
+
+Usage:
+  tsm mux tab new <session> [cmd...]    Create a new tab with a tsm session
+`)
+}
+
 func printUsage() {
 	fmt.Print(`tsm — terminal session manager
 
@@ -1006,6 +1328,13 @@ Usage:
   tsm detach [name]        Detach current or named session
   tsm new <name> [cmd...]  Create a new session
   tsm list                 List active sessions
+  tsm mux open <workspace>  Open workspace from manifest
+  tsm mux save [workspace]  Save current workspace layout
+  tsm mux restore <ws>     Restore workspace from manifest
+  tsm mux split <dir> <s>  Split focused pane with session
+  tsm mux tab new <s>      New tab with session
+  tsm mux doctor <ws>      Diagnose workspace health
+  tsm mux status           Show terminal and backend info
   tsm doctor               Show runtime diagnostics
   tsm doctor clean-stale   Remove stale session sockets
   tsm debug session <name> Show detailed diagnostics for one session
@@ -1015,7 +1344,7 @@ Usage:
   tsm help                 Show this help
 
 Aliases:
-  palette=p  attach=a  detach=d  new=n  list=l,ls  rename=mv  kill=k  version=v  help=h
+  palette=p  attach=a  detach=d  new=n  list=l,ls  rename=mv  kill=k  mux=m  version=v  help=h
 
 Detach from a session with Ctrl+\
 

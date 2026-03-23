@@ -622,12 +622,12 @@ func TestDoctorReportFlagsOlderDaemonBuild(t *testing.T) {
 
 func TestDoctorReportOrphanedArtifacts(t *testing.T) {
 	socketDir := t.TempDir()
-	logDir := filepath.Join(socketDir, "logs")
 	configHome := t.TempDir()
 	t.Setenv("TSM_DIR", socketDir)
 	t.Setenv("XDG_CONFIG_HOME", configHome)
 
 	cfg := session.DefaultConfig()
+	logDir := cfg.LogDir
 	for _, path := range []string{
 		filepath.Join(logDir, "daemon-build", "orphan.json"),
 		filepath.Join(logDir, "claude-statusline", "orphan.json"),
