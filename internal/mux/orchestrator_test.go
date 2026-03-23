@@ -16,8 +16,8 @@ type mockBackend struct {
 	nextPaneID int
 }
 
-func (m *mockBackend) Name() string      { return "mock" }
-func (m *mockBackend) Available() bool    { return true }
+func (m *mockBackend) Name() string    { return "mock" }
+func (m *mockBackend) Available() bool { return true }
 
 func (m *mockBackend) ListWorkspaces() ([]Workspace, error) {
 	m.calls = append(m.calls, "ListWorkspaces")

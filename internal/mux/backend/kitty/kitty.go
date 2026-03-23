@@ -278,17 +278,15 @@ func (b *Backend) Log(msg string) error              { return nil }
 // --- Helpers ---
 
 func kittyLocation(dir mux.Direction) string {
+	// kitty terminology: hsplit = side-by-side (horizontal split line),
+	// vsplit = top/bottom (vertical split line).
 	switch dir {
-	case mux.DirLeft:
-		return "vsplit" // kitty vsplit creates left/right; new pane goes right
-	case mux.DirRight:
+	case mux.DirLeft, mux.DirRight:
+		return "hsplit"
+	case mux.DirUp, mux.DirDown:
 		return "vsplit"
-	case mux.DirUp:
-		return "hsplit"
-	case mux.DirDown:
-		return "hsplit"
 	default:
-		return "vsplit"
+		return "hsplit"
 	}
 }
 
