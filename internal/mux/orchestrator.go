@@ -49,11 +49,14 @@ func (o *Orchestrator) Open(workspaceName string) error {
 	type attachJob struct {
 		surfaceRef  string
 		sessionName string
+		command     string // optional command to run after attach
 	}
 	var jobs []attachJob
 
 	for i, surf := range manifest.Surface {
-		if err := o.ensureSession(surf.Session, surf.Cwd, surf.Command); err != nil {
+		// Don't pass command to ensureSession — it would be used as the shell binary.
+		// Instead we send it as text after attaching.
+		if err := o.ensureSession(surf.Session, surf.Cwd, ""); err != nil {
 			return fmt.Errorf("surface %q: %w", surf.Name, err)
 		}
 
@@ -73,14 +76,14 @@ func (o *Orchestrator) Open(workspaceName string) error {
 			surfaceRef = findNewSurface(surfaces, newSurfaces)
 			surfaces = newSurfaces
 		}
-		jobs = append(jobs, attachJob{surfaceRef: surfaceRef, sessionName: surf.Session})
+		jobs = append(jobs, attachJob{surfaceRef: surfaceRef, sessionName: surf.Session, command: surf.Command})
 
 		for _, sp := range surf.Split {
 			dir, ok := ParseDirection(sp.Direction)
 			if !ok {
 				return fmt.Errorf("surface %q split %q: invalid direction %q", surf.Name, sp.Name, sp.Direction)
 			}
-			if err := o.ensureSession(sp.Session, sp.Cwd, sp.Command); err != nil {
+			if err := o.ensureSession(sp.Session, sp.Cwd, ""); err != nil {
 				return fmt.Errorf("split %q: %w", sp.Name, err)
 			}
 
@@ -99,7 +102,7 @@ func (o *Orchestrator) Open(workspaceName string) error {
 				return fmt.Errorf("split %q: could not find new terminal surface", sp.Name)
 			}
 			surfaces = afterSurfaces
-			jobs = append(jobs, attachJob{surfaceRef: newSurf, sessionName: sp.Session})
+			jobs = append(jobs, attachJob{surfaceRef: newSurf, sessionName: sp.Session, command: sp.Command})
 		}
 	}
 
@@ -108,6 +111,24 @@ func (o *Orchestrator) Open(workspaceName string) error {
 	for _, job := range jobs {
 		if err := o.sendAttach(wsID, job.surfaceRef, job.sessionName); err != nil {
 			return fmt.Errorf("attach %q into %s: %w", job.sessionName, job.surfaceRef, err)
+		}
+	}
+
+	// Phase 3: Send startup commands into sessions that have them.
+	// Brief delay to let sessions finish attaching.
+	hasCommands := false
+	for _, job := range jobs {
+		if job.command != "" {
+			hasCommands = true
+			break
+		}
+	}
+	if hasCommands {
+		time.Sleep(500 * time.Millisecond)
+		for _, job := range jobs {
+			if job.command != "" {
+				_ = o.Backend.SendTextToWorkspace(wsID, job.surfaceRef, job.command+"\n")
+			}
 		}
 	}
 
