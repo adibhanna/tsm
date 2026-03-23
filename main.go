@@ -1228,8 +1228,8 @@ func setupKitty() {
 		os.Exit(1)
 	}
 
-	// Append the setting.
-	line := "\n# Added by tsm for mux support\nallow_remote_control yes\n"
+	// Append the settings.
+	line := "\n# Added by tsm for mux support\nallow_remote_control yes\nenabled_layouts splits,stack\n"
 	f, err := os.OpenFile(confPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error opening kitty.conf: %v\n", err)

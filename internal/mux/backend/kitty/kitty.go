@@ -141,6 +141,9 @@ func (b *Backend) CloseSurface(id string) error {
 // --- Panes (kitty windows within a tab) ---
 
 func (b *Backend) SplitPane(workspaceID string, dir mux.Direction) (mux.Pane, error) {
+	// Ensure the splits layout is active (required for vsplit/hsplit).
+	_, _ = b.run("@", "goto-layout", "splits")
+
 	location := kittyLocation(dir)
 	args := []string{"@", "launch", "--location=" + location, "--cwd=current"}
 	out, err := b.run(args...)
@@ -278,8 +281,9 @@ func (b *Backend) Log(msg string) error              { return nil }
 // --- Helpers ---
 
 func kittyLocation(dir mux.Direction) string {
-	// kitty terminology: hsplit = side-by-side (horizontal split line),
-	// vsplit = top/bottom (vertical split line).
+	// In kitty's splits layout:
+	// hsplit = side-by-side (left | right)
+	// vsplit = stacked (top / bottom)
 	switch dir {
 	case mux.DirLeft, mux.DirRight:
 		return "hsplit"
