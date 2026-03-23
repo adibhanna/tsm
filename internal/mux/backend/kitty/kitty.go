@@ -47,13 +47,13 @@ func (b *Backend) Available() bool {
 // --- Workspaces (kitty OS windows) ---
 
 type kittyOSWindow struct {
-	ID         int        `json:"id"`
-	IsActive   bool       `json:"is_active"`
-	IsFocused  bool       `json:"is_focused"`
-	Tabs       []kittyTab `json:"tabs"`
-	WMClass    string     `json:"wm_class"`
-	WMName     string     `json:"wm_name"`
-	Platform   string     `json:"platform_window_id"`
+	ID        int        `json:"id"`
+	IsActive  bool       `json:"is_active"`
+	IsFocused bool       `json:"is_focused"`
+	Tabs      []kittyTab `json:"tabs"`
+	WMClass   string     `json:"wm_class"`
+	WMName    string     `json:"wm_name"`
+	Platform  int        `json:"platform_window_id"`
 }
 
 type kittyTab struct {
