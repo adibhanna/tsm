@@ -64,6 +64,19 @@ Each daemon also writes a small build-metadata sidecar. That lets newer clients 
 | `process.go` | Process memory and uptime collection |
 | `preview.go` | ANSI-aware preview cropping and width handling |
 
+### `internal/mux`
+
+| File | Purpose |
+| --- | --- |
+| `backend.go` | `Backend` interface, `Direction`, `Workspace`, `Surface`, `Pane` types |
+| `manifest.go` | Workspace manifest TOML schema, load/save/list/validate |
+| `orchestrator.go` | Coordinates backend + tsm sessions for open/split/tab/save/restore/doctor |
+| `detect.go` | Auto-detect terminal emulator from environment variables |
+| `sidebar.go` | Sync session + agent state to cmux sidebar |
+| `backend/cmux/` | cmux CLI wrapper backend |
+| `backend/kitty/` | kitty remote control backend (`kitten @`) |
+| `backend/ghostty/` | Ghostty AppleScript backend (macOS) |
+
 ### `internal/tui`
 
 | File | Purpose |

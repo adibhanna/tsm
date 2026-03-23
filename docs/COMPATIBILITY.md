@@ -69,8 +69,27 @@ Notes:
 - agent activity is advisory status, not a hard execution guarantee
 - Claude can surface richer detached metadata when `tsm claude-statusline` is configured
 
+## Mux Backends (Native Splits)
+
+`tsm mux` orchestrates native terminal splits via backend adapters.
+
+| Terminal | Backend | Splits | Tabs | Sidebar | Platform | Detection |
+| -------- | ------- | ------ | ---- | ------- | -------- | --------- |
+| cmux | cmux | yes | yes | yes | macOS | `CMUX_SOCKET_PATH` |
+| kitty | kitty | yes | yes | no | macOS, Linux | `KITTY_PID` |
+| Ghostty | ghostty | yes | yes | no | macOS only | `GHOSTTY_RESOURCES_DIR` |
+| Alacritty | none | no | no | no | - | - |
+| Terminal.app | none | no | no | no | - | - |
+| iTerm2 | none | no | no | no | - | - |
+
+Notes:
+
+- kitty requires `allow_remote_control yes` and `enabled_layouts splits,tall,stack` in kitty.conf (`tsm mux setup kitty`)
+- Ghostty requires 1.3.0+ and uses the AppleScript API (macOS only, preview feature)
+- cmux sidebar sync pushes session and agent (claude/codex) state
+- terminals without a backend can still use `tsm` for session management — splits are not required
+
 ## Known Scope Boundaries
 
-- `tsm` manages persistent sessions, not panes or splits
 - shell shortcuts only exist inside fresh TSM-managed shells unless you add your own global launcher
 - some behavior changes require fresh sessions because daemons are long-lived

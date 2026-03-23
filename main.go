@@ -1030,6 +1030,10 @@ func cmdMux() {
 		cmdMuxSplit()
 	case "tab":
 		cmdMuxTab()
+	case "edit":
+		cmdMuxEdit()
+	case "new":
+		cmdMuxNew()
 	case "save":
 		cmdMuxSave()
 	case "restore":
@@ -1206,6 +1210,88 @@ func cmdMuxDoctor() {
 		}
 		fmt.Printf("  %s: %s\n", s.Name, state)
 	}
+}
+
+func cmdMuxEdit() {
+	dir, err := mux.ManifestDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "vi"
+	}
+	cmd := exec.Command(editor, dir)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func cmdMuxNew() {
+	if len(os.Args) < 4 {
+		fmt.Fprintln(os.Stderr, "usage: tsm mux new <workspace>")
+		os.Exit(1)
+	}
+	name := os.Args[3]
+
+	dir, err := mux.ManifestDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	path := filepath.Join(dir, name+".toml")
+	if _, err := os.Stat(path); err == nil {
+		fmt.Fprintf(os.Stderr, "Workspace %q already exists at %s\n", name, path)
+		os.Exit(1)
+	}
+
+	cwd, _ := os.Getwd()
+	sample := fmt.Sprintf(`name = "%s"
+version = 1
+
+[[surface]]
+name = "main"
+session = "%s-main"
+cwd = "%s"
+# command = "nvim ."
+
+  [[surface.split]]
+  name = "shell"
+  session = "%s-shell"
+  direction = "right"
+  cwd = "%s"
+`, name, name, cwd, name, cwd)
+
+	if err := os.WriteFile(path, []byte(sample), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Created %s\n", path)
+
+	// Open in editor.
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		return
+	}
+	cmd := exec.Command(editor, path)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	_ = cmd.Run()
 }
 
 func cmdMuxLast() {
@@ -1458,6 +1544,8 @@ func printMuxUsage() {
 
 Usage:
   tsm mux open <workspace>                        Open a workspace from manifest
+  tsm mux new <workspace>                          Create a new workspace manifest
+  tsm mux edit                                     Open workspace manifests in $EDITOR
   tsm mux split <left|right|up|down> <session>     Split focused pane with session
   tsm mux tab new <session> [cmd...]               New tab with session
   tsm mux save <workspace>                          Save current workspace layout

@@ -10,7 +10,7 @@ It is built around a simple model:
 
 - one daemon per session
 - one PTY per session
-- no panes, windows, or tabs inside `tsm`
+- native splits and workspaces via `tsm mux` (cmux, kitty, and Ghostty backends)
 - fast switching between named sessions from the CLI or TUI
 
 For full-screen terminal apps like Neovim, the preferred build uses Ghostty's VT engine so reattach can restore the visible screen instead of only restoring terminal modes.
@@ -42,11 +42,76 @@ Use it when you want:
 - quick Codex / Claude activity checks before switching
 - full-screen restore for Neovim and similar apps on the Ghostty-backed build
 
-Do not expect `tsm` to manage splits. Splits belong to your shell app or your terminal:
+For splits and workspaces, use `tsm mux` to orchestrate your terminal's native split system:
 
-- use Ghostty splits for multiple visible terminals
-- use Neovim splits for editor layout
-- use multiple `tsm` sessions for multiple long-lived work contexts
+- `tsm mux open dev` opens a workspace with splits and sessions from a TOML manifest
+- supports **cmux**, **kitty**, and **Ghostty** as backends (auto-detected)
+- each pane is a real native terminal surface with full GPU rendering, ligatures, scrollback
+- no VT re-emulation like tmux/zellij
+
+## Native Multiplexer (`tsm mux`)
+
+`tsm mux` lets you define workspaces as TOML manifests and open them with native terminal splits. Unlike tmux, it delegates layout to your terminal emulator's own split system — no server wrapping the terminal.
+
+### Workspace manifest
+
+Create `~/.config/tsm/workspaces/dev.toml`:
+
+```toml
+name = "dev"
+version = 1
+
+[[surface]]
+name = "editor"
+session = "editor"
+cwd = "~/Developer/myproject"
+command = "nvim ."
+
+  [[surface.split]]
+  name = "shell"
+  session = "shell"
+  direction = "right"
+  cwd = "~/Developer/myproject"
+```
+
+### Open a workspace
+
+```bash
+tsm mux open dev
+```
+
+This creates the sessions, opens native splits in your terminal, attaches each session, and runs the startup commands.
+
+### Mux commands
+
+```text
+tsm mux open <workspace>                Open workspace from manifest
+tsm mux split <left|right|up|down> <s>  Split focused pane with session
+tsm mux tab new <session>               New tab with session
+tsm mux save <workspace>                Save workspace manifest
+tsm mux restore <workspace>             Restore workspace from manifest
+tsm mux doctor <workspace>              Diagnose workspace health
+tsm mux sidebar sync <workspace>        Sync agent state to cmux sidebar
+tsm mux last                            Focus previous pane
+tsm mux next                            Focus next pane
+tsm mux workspace [name]                List or switch workspaces
+tsm mux setup kitty                     Configure kitty for remote control
+tsm mux status                          Show terminal, backend, workspace info
+```
+
+### Supported backends
+
+| Terminal | Backend | Detection | Splits | Tabs | Sidebar |
+| -------- | ------- | --------- | ------ | ---- | ------- |
+| cmux     | cmux    | `CMUX_SOCKET_PATH` | yes | yes | yes |
+| kitty    | kitty   | `KITTY_PID` | yes | yes | no |
+| Ghostty  | ghostty | `GHOSTTY_RESOURCES_DIR` | yes | yes | no |
+
+Override with `TSM_MUX_BACKEND=cmux` (or `kitty`, `ghostty`).
+
+### TUI workspace picker
+
+Press `w` in the TUI to see available workspaces and open one with Enter.
 
 ## Install
 
@@ -224,6 +289,13 @@ tsm attach [name]
 tsm detach [name]
 tsm new <name> [cmd...]
 tsm ls
+tsm mux open <workspace>
+tsm mux split <dir> <session>
+tsm mux tab new <session>
+tsm mux save <workspace>
+tsm mux restore <workspace>
+tsm mux doctor <workspace>
+tsm mux status
 tsm doctor
 tsm doctor clean-stale
 tsm debug session <name>
@@ -342,6 +414,7 @@ The full TUI is the best workflow when you want:
 | `c`      | Copy attach command             |
 | `s`      | Cycle sort mode                 |
 | `ctrl+o` | Toggle full / simplified layout |
+| `w`      | Open workspace                  |
 | `/`      | Filter                          |
 | `[` `]`  | Scroll activity log             |
 | `ctrl+r` | Refresh                         |
@@ -408,6 +481,7 @@ This integration is optional. Without it, TSM falls back to local Claude transcr
 | `c`      | Copy attach command             |
 | `s`      | Cycle sort mode                 |
 | `ctrl+o` | Toggle full / simplified layout |
+| `w`      | Open workspace                  |
 | `/`      | Filter                          |
 | `ctrl+r` | Refresh                         |
 | `q`      | Quit                            |
@@ -436,6 +510,7 @@ The `palette` keymap applies identically to both layouts.
 | `ctrl+y` | Copy attach command         |
 | `ctrl+s` | Cycle sort mode             |
 | `ctrl+o` | Toggle layout               |
+| `ctrl+w` | Open workspace              |
 | `ctrl+r` | Refresh                     |
 | `ctrl+c` | Quit                        |
 
@@ -577,6 +652,7 @@ Supported action names:
 - `force_quit`
 - `log_up`
 - `log_down`
+- `mux_open`
 
 Set `show_help = false` to hide the shortcut guide in the TUI.
 
@@ -648,6 +724,7 @@ Automated Homebrew publishing expects:
 | `TSM_TUI_MODE`          | Default TUI mode: `full` or `simplified`         |
 | `TSM_TUI_KEYMAP`        | Default TUI keymap: `default` or `palette`       |
 | `TSM_CONFIG_FILE`       | Override config file path                        |
+| `TSM_MUX_BACKEND`       | Override mux backend: `cmux`, `kitty`, `ghostty` |
 | `SHELL`                 | Default shell used for new sessions              |
 
 ## License

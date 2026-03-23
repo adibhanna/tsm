@@ -16,6 +16,18 @@ tsm doctor
 tsm doctor clean-stale
 tsm debug session <name>
 tsm rename <old> <new>
+tsm mux open <workspace>
+tsm mux split <left|right|up|down> <session>
+tsm mux tab new <session> [cmd...]
+tsm mux save <workspace>
+tsm mux restore <workspace>
+tsm mux doctor <workspace>
+tsm mux sidebar sync <workspace>
+tsm mux last
+tsm mux next
+tsm mux workspace [name]
+tsm mux setup kitty
+tsm mux status
 tsm kill [name...]
 tsm version
 tsm help
@@ -31,6 +43,7 @@ new     = n
 list    = l, ls
 rename  = mv
 kill    = k
+mux     = m
 version = v
 help    = h
 ```
@@ -132,6 +145,73 @@ tsm rename old-name new-name
 ```
 
 Renaming updates the daemon-side session name state, so prompt integration and picker metadata stay in sync for fresh sessions.
+
+## Native Multiplexer
+
+`tsm mux` orchestrates your terminal emulator's native split/tab system. Each pane is a real native terminal surface — no VT re-emulation.
+
+### Open a workspace
+
+```bash
+tsm mux open dev
+```
+
+Creates sessions, native splits, attaches sessions, and runs startup commands from `~/.config/tsm/workspaces/dev.toml`.
+
+### Ad-hoc splits and tabs
+
+```bash
+tsm mux split right my-shell
+tsm mux split down my-logs
+tsm mux tab new my-extra
+```
+
+### Save and restore
+
+```bash
+tsm mux save dev
+tsm mux restore dev
+```
+
+### Workspace health
+
+```bash
+tsm mux doctor dev
+```
+
+### Sidebar sync (cmux only)
+
+```bash
+tsm mux sidebar sync dev
+```
+
+Pushes session and agent (claude/codex) state into the cmux sidebar.
+
+### Navigation
+
+```bash
+tsm mux last          # Focus previous pane
+tsm mux next          # Focus next pane
+tsm mux workspace     # List workspaces
+tsm mux workspace dev # Switch workspace
+```
+
+### Backend setup
+
+```bash
+tsm mux setup kitty   # Add allow_remote_control to kitty.conf
+tsm mux status        # Show detected terminal and backend
+```
+
+### Supported backends
+
+| Terminal | Detection env var | Splits | Tabs | Sidebar |
+| -------- | ----------------- | ------ | ---- | ------- |
+| cmux | `CMUX_SOCKET_PATH` | yes | yes | yes |
+| kitty | `KITTY_PID` | yes | yes | no |
+| Ghostty | `GHOSTTY_RESOURCES_DIR` | yes | yes | no |
+
+Override with `TSM_MUX_BACKEND=cmux` (or `kitty`, `ghostty`).
 
 ## Diagnostics
 
