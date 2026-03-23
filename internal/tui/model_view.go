@@ -682,6 +682,7 @@ func (m Model) renderSimplifiedHelp() string {
 		helpKeyStyle.Render(m.killKeyLabel()) + helpStyle.Render(" kill"),
 		helpKeyStyle.Render(m.sortKeyLabel()) + helpStyle.Render(" sort"),
 		helpKeyStyle.Render(m.refreshKeyLabel()) + helpStyle.Render(" refresh"),
+		helpKeyStyle.Render(m.muxOpenKeyLabel()) + helpStyle.Render(" workspace"),
 	}
 
 	if m.inlineFilterEnabled() {
