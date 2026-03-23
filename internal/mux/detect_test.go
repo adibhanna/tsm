@@ -28,8 +28,14 @@ func TestDetectTerminal(t *testing.T) {
 			wantBack: "kitty",
 		},
 		{
-			name:     "wezterm",
-			env:      map[string]string{"WEZTERM_EXECUTABLE": "/usr/bin/wezterm"},
+			name:     "wezterm via socket",
+			env:      map[string]string{"WEZTERM_UNIX_SOCKET": "/tmp/wezterm.sock"},
+			wantName: "wezterm",
+			wantBack: "wezterm",
+		},
+		{
+			name:     "wezterm via pane",
+			env:      map[string]string{"WEZTERM_PANE": "0"},
 			wantName: "wezterm",
 			wantBack: "wezterm",
 		},
@@ -56,7 +62,7 @@ func TestDetectTerminal(t *testing.T) {
 	// Clear all terminal env vars before each subtest.
 	termVars := []string{
 		"CMUX_SOCKET_PATH", "CMUX_SURFACE_ID", "CMUX_WORKSPACE_ID",
-		"KITTY_PID", "WEZTERM_EXECUTABLE", "WEZTERM_UNIX_SOCKET",
+		"KITTY_PID", "WEZTERM_PANE", "WEZTERM_UNIX_SOCKET",
 		"GHOSTTY_RESOURCES_DIR", "ITERM_SESSION_ID", "TERM_PROGRAM",
 		"ALACRITTY_WINDOW_ID",
 	}

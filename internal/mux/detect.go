@@ -23,8 +23,8 @@ func DetectTerminal() Terminal {
 		return Terminal{Name: "kitty", Backend: "kitty"}
 	}
 
-	// WezTerm sets WEZTERM_EXECUTABLE and WEZTERM_UNIX_SOCKET.
-	if os.Getenv("WEZTERM_EXECUTABLE") != "" || os.Getenv("WEZTERM_UNIX_SOCKET") != "" {
+	// WezTerm sets WEZTERM_UNIX_SOCKET and TERM_PROGRAM=WezTerm.
+	if os.Getenv("WEZTERM_UNIX_SOCKET") != "" || os.Getenv("WEZTERM_PANE") != "" {
 		return Terminal{Name: "wezterm", Backend: "wezterm"}
 	}
 
