@@ -132,6 +132,21 @@ func TestManifestValidation(t *testing.T) {
 				{Name: "a", Session: "a", Split: []ManifestSplit{{Name: "b", Session: "b", Direction: "right"}}},
 			}},
 		},
+		{
+			name:    "path traversal with ..",
+			m:       Manifest{Name: "../evil", Version: 1, Surface: []ManifestSurface{{Name: "a", Session: "a"}}},
+			wantErr: true,
+		},
+		{
+			name:    "name with slash",
+			m:       Manifest{Name: "foo/bar", Version: 1, Surface: []ManifestSurface{{Name: "a", Session: "a"}}},
+			wantErr: true,
+		},
+		{
+			name:    "hidden name with leading dot",
+			m:       Manifest{Name: ".hidden", Version: 1, Surface: []ManifestSurface{{Name: "a", Session: "a"}}},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -183,6 +198,7 @@ func TestExpandPath(t *testing.T) {
 		want  string
 	}{
 		{"~/foo", filepath.Join(home, "foo")},
+		{"~", home},
 		{"/absolute/path", "/absolute/path"},
 		{"relative/path", "relative/path"},
 	}
@@ -190,6 +206,45 @@ func TestExpandPath(t *testing.T) {
 		if got := ExpandPath(tt.input); got != tt.want {
 			t.Errorf("ExpandPath(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestValidateWorkspaceName(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"valid name", "my-workspace", false},
+		{"empty name", "", true},
+		{"path traversal", "../evil", true},
+		{"slash in name", "foo/bar", true},
+		{"backslash in name", "foo\\bar", true},
+		{"hidden name", ".hidden", true},
+		{"double dot in middle", "foo..bar", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateWorkspaceName(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateWorkspaceName(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSaveManifestValidates(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	// Attempt to save a manifest with a path-traversal name.
+	m := &Manifest{
+		Name:    "../evil",
+		Version: 1,
+		Surface: []ManifestSurface{{Name: "a", Session: "a"}},
+	}
+	if err := SaveManifest(m); err == nil {
+		t.Error("SaveManifest should reject manifest with unsafe name")
 	}
 }
 

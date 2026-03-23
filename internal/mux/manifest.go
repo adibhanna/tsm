@@ -69,8 +69,24 @@ func LoadManifest(name string) (*Manifest, error) {
 	return &m, nil
 }
 
+// ValidateWorkspaceName checks that a workspace name is safe for use in file paths.
+// It rejects names containing /, \, .., or leading dots.
+func ValidateWorkspaceName(name string) error {
+	if name == "" {
+		return fmt.Errorf("workspace name must not be empty")
+	}
+	if strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") || strings.HasPrefix(name, ".") {
+		return fmt.Errorf("workspace name %q contains unsafe characters", name)
+	}
+	return nil
+}
+
 // SaveManifest writes a workspace manifest to disk.
 func SaveManifest(m *Manifest) error {
+	if err := validateManifest(m); err != nil {
+		return fmt.Errorf("validate manifest: %w", err)
+	}
+
 	dir, err := ManifestDir()
 	if err != nil {
 		return err

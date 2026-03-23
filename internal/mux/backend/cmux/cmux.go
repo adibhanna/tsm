@@ -345,20 +345,10 @@ func (b *Backend) ReadScreen(workspaceID, surfaceID string) (string, error) {
 // --- Layout ---
 
 func (b *Backend) GetTree(workspaceID string) (mux.LayoutNode, error) {
-	args := []string{"--json", "tree"}
-	if workspaceID != "" {
-		args = append(args, "--workspace", workspaceID)
-	}
-	out, err := b.run(args...)
-	if err != nil {
-		return mux.LayoutNode{}, fmt.Errorf("tree: %w", err)
-	}
 	// Intentionally unimplemented for V1: the tree JSON structure varies
 	// across cmux versions and full layout save/restore is not yet needed.
 	// Return a minimal stub so callers don't break.
-	node := mux.LayoutNode{Type: "workspace"}
-	_ = out
-	return node, nil
+	return mux.LayoutNode{Type: "workspace"}, nil
 }
 
 // --- Navigation ---

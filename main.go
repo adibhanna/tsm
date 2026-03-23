@@ -1094,6 +1094,10 @@ func cmdMuxSplit() {
 		os.Exit(1)
 	}
 	sessionName := os.Args[4]
+	if err := session.ValidateSessionName(sessionName); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 	cmd := os.Args[5:]
 
 	orch, err := newOrchestrator()
@@ -1122,6 +1126,10 @@ func cmdMuxTab() {
 			os.Exit(1)
 		}
 		sessionName := os.Args[4]
+		if err := session.ValidateSessionName(sessionName); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 		cmd := os.Args[5:]
 
 		orch, err := newOrchestrator()
@@ -1244,6 +1252,11 @@ func cmdMuxNew() {
 	}
 	name := os.Args[3]
 
+	if err := mux.ValidateWorkspaceName(name); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
 	dir, err := mux.ManifestDir()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -1261,23 +1274,27 @@ func cmdMuxNew() {
 	}
 
 	cwd, _ := os.Getwd()
-	sample := fmt.Sprintf(`name = "%s"
-version = 1
+	m := &mux.Manifest{
+		Name:    name,
+		Version: 1,
+		Surface: []mux.ManifestSurface{
+			{
+				Name:    "main",
+				Session: name + "-main",
+				Cwd:     cwd,
+				Split: []mux.ManifestSplit{
+					{
+						Name:      "shell",
+						Session:   name + "-shell",
+						Direction: "right",
+						Cwd:       cwd,
+					},
+				},
+			},
+		},
+	}
 
-[[surface]]
-name = "main"
-session = "%s-main"
-cwd = "%s"
-# command = "nvim ."
-
-  [[surface.split]]
-  name = "shell"
-  session = "%s-shell"
-  direction = "right"
-  cwd = "%s"
-`, name, name, cwd, name, cwd)
-
-	if err := os.WriteFile(path, []byte(sample), 0o644); err != nil {
+	if err := mux.SaveManifest(m); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

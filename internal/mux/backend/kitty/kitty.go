@@ -205,7 +205,25 @@ func (b *Backend) SplitPane(workspaceID string, dir mux.Direction) (mux.Pane, er
 		return mux.Pane{}, fmt.Errorf("launch split: %w", err)
 	}
 	id := strings.TrimSpace(out)
-	return mux.Pane{ID: id, SurfaceID: id}, nil
+
+	// The launch command returns a kitty window (pane) ID. SurfaceID should
+	// be the tab ID that contains this window. Use listAll() to find it.
+	surfaceID := id // fallback: use window ID if lookup fails
+	if winID, err := strconv.Atoi(id); err == nil {
+		if osWindows, err := b.listAll(); err == nil {
+			for _, osw := range osWindows {
+				for _, tab := range osw.Tabs {
+					for _, win := range tab.Windows {
+						if win.ID == winID {
+							surfaceID = strconv.Itoa(tab.ID)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return mux.Pane{ID: id, SurfaceID: surfaceID}, nil
 }
 
 func (b *Backend) ClosePane(id string) error {

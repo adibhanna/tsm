@@ -74,6 +74,9 @@ func (o *Orchestrator) Open(workspaceName string) error {
 				return fmt.Errorf("surface %q: list surfaces: %w", surf.Name, err)
 			}
 			surfaceRef = findNewSurface(surfaces, newSurfaces)
+			if surfaceRef == "" {
+				return fmt.Errorf("surface %q: could not find new terminal surface", surf.Name)
+			}
 			surfaces = newSurfaces
 		}
 		jobs = append(jobs, attachJob{surfaceRef: surfaceRef, sessionName: surf.Session, command: surf.Command})
@@ -337,13 +340,20 @@ func (o *Orchestrator) ensureSession(name, cwd, command string) error {
 		shellCmd = []string{command}
 	}
 
-	// Temporarily change CWD for the daemon spawn, then restore it.
+	// Temporarily change CWD so the child process spawned by SpawnDaemon
+	// inherits it. SpawnDaemon re-execs the binary as a subprocess and does
+	// not accept a directory parameter, so os.Chdir is the only way to
+	// pass CWD to the child. We save and restore the original CWD with
+	// defer. If os.Getwd fails, we skip the chdir entirely to avoid
+	// leaving the process in an unknown directory.
 	if cwd != "" {
 		expanded := ExpandPath(cwd)
-		origDir, _ := os.Getwd()
-		if err := os.Chdir(expanded); err != nil {
+		origDir, gwdErr := os.Getwd()
+		if gwdErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not determine current directory, skipping chdir to %q: %v\n", expanded, gwdErr)
+		} else if err := os.Chdir(expanded); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not chdir to %q: %v\n", expanded, err)
-		} else if origDir != "" {
+		} else {
 			defer os.Chdir(origDir)
 		}
 	}

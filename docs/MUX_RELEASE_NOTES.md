@@ -33,17 +33,20 @@ Each pane is a real terminal surface. Zero re-emulation. 100% native features.
 ## Three backends, one interface
 
 ### cmux
+
 - Full support: splits, tabs, workspaces, sidebar status sync
 - Agent state (Claude/Codex) pushed to cmux sidebar
 - Detected via `CMUX_SOCKET_PATH`
 
 ### kitty
+
 - Splits, tabs, workspaces via `kitten @` remote control
 - Requires `allow_remote_control yes` in kitty.conf
 - One-command setup: `tsm mux setup kitty`
 - Detected via `KITTY_PID`
 
 ### Ghostty
+
 - Splits, tabs, workspaces via AppleScript API
 - macOS only, requires Ghostty 1.3.0+
 - Detected via `GHOSTTY_RESOURCES_DIR`
@@ -85,22 +88,22 @@ tsm mux restore dev
 
 ## All new commands
 
-| Command | What it does |
-|---------|-------------|
-| `tsm mux open <workspace>` | Open workspace — creates splits, attaches sessions, runs commands |
-| `tsm mux new <workspace>` | Create a new workspace manifest with sample template |
-| `tsm mux edit` | Open workspace directory in $EDITOR |
-| `tsm mux split <dir> <session>` | Ad-hoc split: `tsm mux split right my-shell` |
-| `tsm mux tab new <session>` | New tab with a session attached |
-| `tsm mux save <workspace>` | Save current workspace manifest |
-| `tsm mux restore <workspace>` | Restore workspace from saved manifest |
-| `tsm mux doctor <workspace>` | Check which sessions are alive/dead |
-| `tsm mux sidebar sync <ws>` | Push Claude/Codex agent state to cmux sidebar |
-| `tsm mux last` | Focus previous pane |
-| `tsm mux next` | Focus next pane |
-| `tsm mux workspace [name]` | List or switch workspaces |
-| `tsm mux setup kitty` | Configure kitty for remote control |
-| `tsm mux status` | Show detected terminal, backend, workspace info |
+| Command                         | What it does                                                      |
+| ------------------------------- | ----------------------------------------------------------------- |
+| `tsm mux open <workspace>`      | Open workspace — creates splits, attaches sessions, runs commands |
+| `tsm mux new <workspace>`       | Create a new workspace manifest with sample template              |
+| `tsm mux edit`                  | Open workspace directory in $EDITOR                               |
+| `tsm mux split <dir> <session>` | Ad-hoc split: `tsm mux split right my-shell`                      |
+| `tsm mux tab new <session>`     | New tab with a session attached                                   |
+| `tsm mux save <workspace>`      | Save current workspace manifest                                   |
+| `tsm mux restore <workspace>`   | Restore workspace from saved manifest                             |
+| `tsm mux doctor <workspace>`    | Check which sessions are alive/dead                               |
+| `tsm mux sidebar sync <ws>`     | Push Claude/Codex agent state to cmux sidebar                     |
+| `tsm mux last`                  | Focus previous pane                                               |
+| `tsm mux next`                  | Focus next pane                                                   |
+| `tsm mux workspace [name]`      | List or switch workspaces                                         |
+| `tsm mux setup kitty`           | Configure kitty for remote control                                |
+| `tsm mux status`                | Show detected terminal, backend, workspace info                   |
 
 ## TUI integration
 
@@ -136,6 +139,7 @@ tsm mux sidebar sync dev
 ```
 
 Shows per-session status like:
+
 - `claude · working · implementing auth flow`
 - `codex · thinking`
 - `2/2 sessions live`
@@ -144,14 +148,14 @@ Shows per-session status like:
 
 tsm auto-detects your terminal and selects the right backend:
 
-| Terminal | Detected via | Backend |
-|----------|-------------|---------|
-| cmux | `CMUX_SOCKET_PATH` | cmux |
-| kitty | `KITTY_PID` | kitty |
-| Ghostty | `GHOSTTY_RESOURCES_DIR` | ghostty |
-| WezTerm | `WEZTERM_EXECUTABLE` | (planned) |
-| iTerm2 | `ITERM_SESSION_ID` | none |
-| Alacritty | `ALACRITTY_WINDOW_ID` | none |
+| Terminal  | Detected via            | Backend   |
+| --------- | ----------------------- | --------- |
+| cmux      | `CMUX_SOCKET_PATH`      | cmux      |
+| kitty     | `KITTY_PID`             | kitty     |
+| Ghostty   | `GHOSTTY_RESOURCES_DIR` | ghostty   |
+| WezTerm   | `WEZTERM_EXECUTABLE`    | (planned) |
+| iTerm2    | `ITERM_SESSION_ID`      | none      |
+| Alacritty | `ALACRITTY_WINDOW_ID`   | none      |
 
 ## Architecture
 
@@ -169,6 +173,7 @@ tsm auto-detects your terminal and selects the right backend:
 ```
 
 The `Backend` interface abstracts all terminal control:
+
 - `SplitPane`, `CreateSurface`, `CreateWorkspace` — layout
 - `SendText`, `SendTextToWorkspace` — input
 - `ListPaneSurfaces`, `GetFocusedPane` — introspection

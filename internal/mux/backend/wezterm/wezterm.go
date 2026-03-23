@@ -51,8 +51,8 @@ type paneInfo struct {
 }
 
 type clientInfo struct {
-	Workspace    string `json:"workspace"`
-	FocusedPaneID int   `json:"focused_pane_id"`
+	Workspace     string `json:"workspace"`
+	FocusedPaneID int    `json:"focused_pane_id"`
 }
 
 func (b *Backend) listPanes() ([]paneInfo, error) {

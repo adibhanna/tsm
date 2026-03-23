@@ -234,6 +234,40 @@ func (m Model) simplifiedView() tea.View {
 	if agentLine != "" {
 		contentHeight++
 	}
+	titleLeft := " sessions "
+	titleRight := ""
+
+	if m.state == stateMuxOpen {
+		titleLeft = " workspaces "
+		titleRight = " enter:open esc:cancel "
+		var wsLines []string
+		for i, name := range m.workspaceNames {
+			prefix := "  "
+			if i == m.workspaceCursor {
+				prefix = "> "
+			}
+			wsLines = append(wsLines, prefix+name)
+		}
+		listContent := clampLines(strings.Join(wsLines, "\n"), rowsHeight)
+		bodyContent := clampLines(listContent, contentHeight)
+
+		pane := listBorderStyle.
+			Width(outerWidth).
+			Height(contentHeight + 2).
+			Render(bodyContent)
+		pane = replaceTopBorder(pane, buildTopBorderLRStyled(titleLeft, titleRight, outerWidth, sortStyle))
+
+		full := centerBlock(pane, m.width)
+		if help != "" {
+			helpBlock := lipgloss.NewStyle().Width(outerWidth).Render(help)
+			full = lipgloss.JoinVertical(lipgloss.Left, full, centerBlock(helpBlock, m.width))
+		}
+		full = centerVertically(full, m.height)
+		v := tea.NewView(clampLines(full, m.height))
+		v.AltScreen = true
+		return v
+	}
+
 	listContent := clampLines(m.renderPaletteList(rowsHeight, innerWidth), rowsHeight)
 	bodyLines := []string{queryLine}
 	if agentLine != "" {
@@ -241,9 +275,6 @@ func (m Model) simplifiedView() tea.View {
 	}
 	bodyLines = append(bodyLines, listContent)
 	bodyContent := clampLines(strings.Join(bodyLines, "\n"), contentHeight)
-
-	titleLeft := " sessions "
-	titleRight := ""
 
 	pane := listBorderStyle.
 		Width(outerWidth).

@@ -462,14 +462,16 @@ func (m Model) handleMuxOpenKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.state = stateNormal
 		return m, nil
 
-	case tea.KeyUp:
-		if m.workspaceCursor > 0 {
-			m.workspaceCursor--
-		}
-
-	case tea.KeyDown:
-		if m.workspaceCursor < len(m.workspaceNames)-1 {
-			m.workspaceCursor++
+	default:
+		switch {
+		case m.isMoveUpKey(msg):
+			if m.workspaceCursor > 0 {
+				m.workspaceCursor--
+			}
+		case m.isMoveDownKey(msg):
+			if m.workspaceCursor < len(m.workspaceNames)-1 {
+				m.workspaceCursor++
+			}
 		}
 	}
 
