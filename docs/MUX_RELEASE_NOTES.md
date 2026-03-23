@@ -30,7 +30,7 @@ tsm mux open dev
 
 Each pane is a real terminal surface. Zero re-emulation. 100% native features.
 
-## Three backends, one interface
+## Four backends, one interface
 
 ### cmux
 
@@ -50,6 +50,12 @@ Each pane is a real terminal surface. Zero re-emulation. 100% native features.
 - Splits, tabs, workspaces via AppleScript API
 - macOS only, requires Ghostty 1.3.0+
 - Detected via `GHOSTTY_RESOURCES_DIR`
+
+### WezTerm
+
+- Splits, tabs, workspaces via `wezterm cli` subcommands
+- Works out of the box — no config changes needed
+- Detected via `WEZTERM_UNIX_SOCKET` or `WEZTERM_PANE`
 
 All backends auto-detected from environment variables. Override with `TSM_MUX_BACKEND`.
 
@@ -153,7 +159,7 @@ tsm auto-detects your terminal and selects the right backend:
 | cmux      | `CMUX_SOCKET_PATH`      | cmux      |
 | kitty     | `KITTY_PID`             | kitty     |
 | Ghostty   | `GHOSTTY_RESOURCES_DIR` | ghostty   |
-| WezTerm   | `WEZTERM_EXECUTABLE`    | (planned) |
+| WezTerm   | `WEZTERM_UNIX_SOCKET`   | wezterm   |
 | iTerm2    | `ITERM_SESSION_ID`      | none      |
 | Alacritty | `ALACRITTY_WINDOW_ID`   | none      |
 
@@ -190,7 +196,7 @@ Adding a new backend (WezTerm, etc.) is one file implementing the interface.
 ## What's NOT in this release
 
 - No VT re-emulation (by design — that's the whole point)
-- No WezTerm backend yet (API exists, implementation planned)
+- WezTerm pane navigation (`last`/`next`) works natively via `activate-pane-direction`
 - No Linux Ghostty support (Ghostty's D-Bus API doesn't support splits yet)
 - No Alacritty/iTerm2 support (no split APIs)
 - Pane navigation (`last`/`next`) works best via terminal keybindings, not CLI
