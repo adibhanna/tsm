@@ -159,6 +159,18 @@ func (b *Backend) SplitPane(workspaceID string, dir mux.Direction) (mux.Pane, er
 	case mux.DirDown:
 		args = append(args, "--bottom")
 	}
+	// Target a pane in the workspace so the split goes there, not in the caller's pane.
+	if workspaceID != "" {
+		panes, err := b.listPanes()
+		if err == nil {
+			for _, p := range panes {
+				if p.Workspace == workspaceID {
+					args = append(args, "--pane-id", strconv.Itoa(p.PaneID))
+					break
+				}
+			}
+		}
+	}
 	out, err := b.run(args...)
 	if err != nil {
 		return mux.Pane{}, fmt.Errorf("split-pane: %w", err)
