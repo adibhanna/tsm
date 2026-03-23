@@ -1543,21 +1543,21 @@ func printMuxUsage() {
 	fmt.Print(`tsm mux — native terminal multiplexer
 
 Usage:
-  tsm mux open <workspace>                        Open a workspace from manifest
-  tsm mux new <workspace>                          Create a new workspace manifest
-  tsm mux edit                                     Open workspace manifests in $EDITOR
-  tsm mux split <left|right|up|down> <session>     Split focused pane with session
-  tsm mux tab new <session> [cmd...]               New tab with session
-  tsm mux save <workspace>                          Save current workspace layout
-  tsm mux restore <workspace>                      Restore workspace from manifest
-  tsm mux last                                     Focus previous pane
-  tsm mux next                                     Focus next pane
-  tsm mux workspace [name]                         List or switch workspaces
-  tsm mux doctor <workspace>                       Diagnose workspace health
-  tsm mux sidebar sync <workspace>                 Sync session state to cmux sidebar
-  tsm mux setup kitty                              Enable kitty remote control
-  tsm mux status                                   Show terminal, backend, and workspace info
-  tsm mux help                                     Show this help
+  tsm mux open <workspace>       Open workspace from manifest
+  tsm mux new <workspace>        Create a new workspace manifest
+  tsm mux edit                   Open workspace dir in $EDITOR
+  tsm mux split <dir> <session>  Split focused pane with session
+  tsm mux tab new <session>      New tab with session
+  tsm mux save <workspace>       Save workspace manifest
+  tsm mux restore <workspace>    Restore workspace from manifest
+  tsm mux last                   Focus previous pane
+  tsm mux next                   Focus next pane
+  tsm mux workspace [name]       List or switch workspaces
+  tsm mux doctor <workspace>     Diagnose workspace health
+  tsm mux sidebar sync <ws>      Sync agent state to cmux sidebar
+  tsm mux setup kitty            Enable kitty remote control
+  tsm mux status                 Show terminal, backend, workspace info
+  tsm mux help                   Show this help
 
 Workspaces are defined as TOML manifests in ~/.config/tsm/workspaces/
 
