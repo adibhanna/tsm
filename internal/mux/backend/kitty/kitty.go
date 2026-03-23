@@ -151,7 +151,7 @@ func (b *Backend) SplitPane(workspaceID string, dir mux.Direction) (mux.Pane, er
 		return mux.Pane{}, fmt.Errorf("launch split: %w", err)
 	}
 	id := strings.TrimSpace(out)
-	return mux.Pane{ID: id}, nil
+	return mux.Pane{ID: id, SurfaceID: id}, nil
 }
 
 func (b *Backend) ClosePane(id string) error {
