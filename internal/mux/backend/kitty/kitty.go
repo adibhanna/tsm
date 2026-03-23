@@ -144,7 +144,9 @@ func (b *Backend) findOSWindowByWindowID(winID string) (string, error) {
 }
 
 func (b *Backend) SelectWorkspace(id string) error {
-	_, err := b.run("@", "focus-window", "--match=id:"+id)
+	// id is an OS window ID — use focus-tab to activate a window inside it,
+	// which brings the OS window to the front.
+	_, err := b.run("@", "focus-window", "--match=os_window_id:"+id)
 	if err != nil {
 		return fmt.Errorf("focus-window: %w", err)
 	}
