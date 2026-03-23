@@ -693,6 +693,25 @@ func launchTUI(opts tui.Options) {
 			os.Exit(1)
 		}
 	}
+
+	// If the user selected a workspace to open, run tsm mux open.
+	type muxOpener interface {
+		MuxOpenTarget() string
+	}
+	if m, ok := finalModel.(muxOpener); ok && m.MuxOpenTarget() != "" {
+		exe, err := os.Executable()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		cmd := exec.Command(exe, "mux", "open", m.MuxOpenTarget())
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error opening workspace: %v\n", err)
+			os.Exit(1)
+		}
+	}
 }
 
 func runCommand(name string, args ...string) error {

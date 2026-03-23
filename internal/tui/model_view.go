@@ -112,6 +112,12 @@ func (m Model) fullView() tea.View {
 	if len(visible) != len(m.sessions) {
 		listTitleLeft = fmt.Sprintf(" tsm (%d/%d) ", len(visible), len(m.sessions))
 	}
+	if m.muxTerminal != "" {
+		listTitleLeft = fmt.Sprintf(" tsm [%s] (%d) ", m.muxTerminal, len(visible))
+		if len(visible) != len(m.sessions) {
+			listTitleLeft = fmt.Sprintf(" tsm [%s] (%d/%d) ", m.muxTerminal, len(visible), len(m.sessions))
+		}
+	}
 	sortArrow := "↑"
 	if !m.sortAsc {
 		sortArrow = "↓"
@@ -136,16 +142,30 @@ func (m Model) fullView() tea.View {
 		selected = visible[m.cursor]
 	}
 	previewContent := ""
-	if selected.AgentKind != "" {
+	previewTitleLeft := " Preview "
+	previewTitleRight := ""
+	if m.state == stateMuxOpen {
+		previewTitleLeft = " Workspaces "
+		previewTitleRight = " enter:open esc:cancel "
+		var lines []string
+		for i, name := range m.workspaceNames {
+			prefix := "  "
+			if i == m.workspaceCursor {
+				prefix = "> "
+			}
+			lines = append(lines, prefix+name)
+		}
+		previewContent = clampLines(strings.Join(lines, "\n"), ch)
+	} else if selected.AgentKind != "" {
 		previewContent = m.renderAgentPreview(selected, pw, ch)
 	} else {
 		previewContent = clampLines(engine.ScrollPreview(m.preview, m.previewScrollX, pw), ch)
 	}
-	previewTitleLeft := " Preview "
-	previewTitleRight := ""
-	if selected.Name != "" {
-		previewTitleLeft = fmt.Sprintf(" %s ", selected.Name)
-		previewTitleRight = fmt.Sprintf(" 📂 %s ", selected.DisplayDir())
+	if m.state != stateMuxOpen {
+		if selected.Name != "" {
+			previewTitleLeft = fmt.Sprintf(" %s ", selected.Name)
+			previewTitleRight = fmt.Sprintf(" 📂 %s ", selected.DisplayDir())
+		}
 	}
 	pow := m.previewOuterWidth()
 
@@ -568,6 +588,10 @@ func (m Model) renderHelp() string {
 		return helpStyle.Render(" /") + helpKeyStyle.Render(m.filterText) + helpStyle.Render(cursor+"  Enter accept | Esc clear")
 	}
 
+	if m.state == stateMuxOpen {
+		return helpStyle.Render(" Select workspace: ") + helpKeyStyle.Render("↑↓") + helpStyle.Render(" nav | Enter open | Esc cancel")
+	}
+
 	if m.state == stateConfirmKill {
 		targets := m.killTargets()
 		if len(targets) == 1 {
@@ -594,6 +618,7 @@ func (m Model) renderHelp() string {
 		helpKeyStyle.Render(m.sortKeyLabel()) + helpStyle.Render(" sort"),
 		helpKeyStyle.Render(m.refreshKeyLabel()) + helpStyle.Render(" refresh"),
 		helpKeyStyle.Render(m.toggleLayoutKeyLabel()) + helpStyle.Render(" layout"),
+		helpKeyStyle.Render(m.muxOpenKeyLabel()) + helpStyle.Render(" workspace"),
 	}
 	if m.filterText != "" {
 		parts = append(parts, helpKeyStyle.Render("esc")+helpStyle.Render(" clear"))
