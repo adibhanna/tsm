@@ -4,7 +4,7 @@ This document describes the current product boundary for `tsm`.
 
 ## Session Manager with Native Multiplexer
 
-`tsm` manages long-lived terminal sessions. For splits and workspaces, `tsm mux` orchestrates your terminal emulator's native split system (cmux, kitty, or Ghostty).
+`tsm` manages long-lived terminal sessions. For splits and workspaces, `tsm mux` orchestrates your terminal emulator's native split system (cmux, kitty, Ghostty, or WezTerm).
 
 Unlike tmux/zellij, `tsm mux` does not re-emulate VT output. Each pane is a real native terminal surface. This means:
 
@@ -17,6 +17,7 @@ Current mux limitations:
 - cmux backend: `tsm mux` commands that create/modify layout require running from a non-attached cmux pane (cmux's default `cmuxOnly` socket mode blocks access from tsm session daemons)
 - kitty backend: requires `allow_remote_control yes` and `enabled_layouts splits,tall,stack` in kitty.conf
 - Ghostty backend: macOS only (uses AppleScript API), no `ReadScreen` support
+- WezTerm backend: works out of the box, no config changes needed
 - `tsm mux last` / `next` don't visually switch panes when run from a shell (pane navigation is best done via terminal keybindings)
 - Alacritty, Terminal.app, and iTerm2 have no split APIs and are not supported as mux backends
 

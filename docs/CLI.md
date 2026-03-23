@@ -210,8 +210,9 @@ tsm mux status        # Show detected terminal and backend
 | cmux | `CMUX_SOCKET_PATH` | yes | yes | yes |
 | kitty | `KITTY_PID` | yes | yes | no |
 | Ghostty | `GHOSTTY_RESOURCES_DIR` | yes | yes | no |
+| WezTerm | `WEZTERM_UNIX_SOCKET` | yes | yes | no |
 
-Override with `TSM_MUX_BACKEND=cmux` (or `kitty`, `ghostty`).
+Override with `TSM_MUX_BACKEND=cmux` (or `kitty`, `ghostty`, `wezterm`).
 
 ## Diagnostics
 

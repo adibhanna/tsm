@@ -76,6 +76,7 @@ Each daemon also writes a small build-metadata sidecar. That lets newer clients 
 | `backend/cmux/` | cmux CLI wrapper backend |
 | `backend/kitty/` | kitty remote control backend (`kitten @`) |
 | `backend/ghostty/` | Ghostty AppleScript backend (macOS) |
+| `backend/wezterm/` | WezTerm CLI backend (`wezterm cli`) |
 
 ### `internal/tui`
 
