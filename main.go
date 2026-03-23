@@ -1016,6 +1016,8 @@ func cmdMux() {
 		cmdMuxRestore()
 	case "doctor":
 		cmdMuxDoctor()
+	case "setup":
+		cmdMuxSetup()
 	case "sidebar":
 		cmdMuxSidebar()
 	case "status":
@@ -1180,6 +1182,70 @@ func cmdMuxDoctor() {
 	}
 }
 
+func cmdMuxSetup() {
+	if len(os.Args) < 4 {
+		fmt.Fprintln(os.Stderr, "usage: tsm mux setup <kitty>")
+		os.Exit(1)
+	}
+	target := os.Args[3]
+	switch target {
+	case "kitty":
+		setupKitty()
+	default:
+		fmt.Fprintf(os.Stderr, "tsm mux setup: unknown target %q (supported: kitty)\n", target)
+		os.Exit(1)
+	}
+}
+
+func setupKitty() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	confDir := filepath.Join(home, ".config", "kitty")
+	confPath := filepath.Join(confDir, "kitty.conf")
+
+	// Read existing config.
+	existing, _ := os.ReadFile(confPath)
+	content := string(existing)
+
+	// Check if already configured.
+	if strings.Contains(content, "allow_remote_control") {
+		if strings.Contains(content, "allow_remote_control yes") || strings.Contains(content, "allow_remote_control socket-only") {
+			fmt.Println("kitty remote control is already enabled")
+			return
+		}
+		fmt.Fprintln(os.Stderr, "kitty.conf has allow_remote_control set to a different value")
+		fmt.Fprintln(os.Stderr, "Edit ~/.config/kitty/kitty.conf and set: allow_remote_control yes")
+		os.Exit(1)
+	}
+
+	// Create config dir if needed.
+	if err := os.MkdirAll(confDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating config dir: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Append the setting.
+	line := "\n# Added by tsm for mux support\nallow_remote_control yes\n"
+	f, err := os.OpenFile(confPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening kitty.conf: %v\n", err)
+		os.Exit(1)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(line); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing kitty.conf: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Added allow_remote_control to %s\n", confPath)
+	fmt.Println("Restart kitty for the change to take effect")
+}
+
 func cmdMuxSidebar() {
 	if len(os.Args) < 4 {
 		fmt.Fprintln(os.Stderr, "usage: tsm mux sidebar sync [workspace]")
@@ -1301,6 +1367,7 @@ Usage:
   tsm mux restore <workspace>                      Restore workspace from manifest
   tsm mux doctor <workspace>                       Diagnose workspace health
   tsm mux sidebar sync <workspace>                 Sync session state to cmux sidebar
+  tsm mux setup kitty                              Enable kitty remote control
   tsm mux status                                   Show terminal, backend, and workspace info
   tsm mux help                                     Show this help
 
