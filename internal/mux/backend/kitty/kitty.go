@@ -325,6 +325,18 @@ func (b *Backend) GetTree(workspaceID string) (mux.LayoutNode, error) {
 	return mux.LayoutNode{Type: "workspace"}, nil
 }
 
+// --- Navigation ---
+
+func (b *Backend) FocusNextPane() error {
+	_, err := b.run("@", "focus-window", "--match=neighbor:next")
+	return err
+}
+
+func (b *Backend) FocusPreviousPane() error {
+	_, err := b.run("@", "focus-window", "--match=neighbor:previous")
+	return err
+}
+
 // --- Sidebar (no-op for kitty) ---
 
 func (b *Backend) SetStatus(key, value string) error { return nil }

@@ -359,6 +359,18 @@ func (b *Backend) GetTree(workspaceID string) (mux.LayoutNode, error) {
 	return node, nil
 }
 
+// --- Navigation ---
+
+func (b *Backend) FocusNextPane() error {
+	_, err := b.run("next-pane")
+	return err
+}
+
+func (b *Backend) FocusPreviousPane() error {
+	_, err := b.run("last-pane")
+	return err
+}
+
 // --- Sidebar ---
 
 func (b *Backend) SetStatus(key, value string) error {

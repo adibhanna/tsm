@@ -240,6 +240,18 @@ func (b *Backend) GetTree(workspaceID string) (mux.LayoutNode, error) {
 	return mux.LayoutNode{Type: "workspace"}, nil
 }
 
+// --- Navigation ---
+
+func (b *Backend) FocusNextPane() error {
+	_, err := osascript(`tell application "Ghostty" to perform action "goto_split:next" on focused terminal of selected tab of front window`)
+	return err
+}
+
+func (b *Backend) FocusPreviousPane() error {
+	_, err := osascript(`tell application "Ghostty" to perform action "goto_split:previous" on focused terminal of selected tab of front window`)
+	return err
+}
+
 // --- Sidebar (no-op for Ghostty) ---
 
 func (b *Backend) SetStatus(key, value string) error { return nil }

@@ -1017,6 +1017,12 @@ func cmdMux() {
 		cmdMuxRestore()
 	case "doctor":
 		cmdMuxDoctor()
+	case "last", "prev":
+		cmdMuxLast()
+	case "next":
+		cmdMuxNext()
+	case "workspace", "ws":
+		cmdMuxWorkspace()
 	case "setup":
 		cmdMuxSetup()
 	case "sidebar":
@@ -1181,6 +1187,73 @@ func cmdMuxDoctor() {
 		}
 		fmt.Printf("  %s: %s\n", s.Name, state)
 	}
+}
+
+func cmdMuxLast() {
+	orch, err := newOrchestrator()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	if err := orch.Backend.FocusPreviousPane(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func cmdMuxNext() {
+	orch, err := newOrchestrator()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	if err := orch.Backend.FocusNextPane(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func cmdMuxWorkspace() {
+	if len(os.Args) < 4 {
+		// List workspaces.
+		orch, err := newOrchestrator()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		workspaces, err := orch.Backend.ListWorkspaces()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		for _, w := range workspaces {
+			fmt.Printf("%s\t%s\n", w.ID, w.Name)
+		}
+		return
+	}
+	// Switch to named workspace.
+	name := os.Args[3]
+	orch, err := newOrchestrator()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	workspaces, err := orch.Backend.ListWorkspaces()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	for _, w := range workspaces {
+		if w.Name == name || w.ID == name {
+			if err := orch.Backend.SelectWorkspace(w.ID); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+	}
+	fmt.Fprintf(os.Stderr, "Workspace %q not found\n", name)
+	os.Exit(1)
 }
 
 func cmdMuxSetup() {
@@ -1370,6 +1443,9 @@ Usage:
   tsm mux tab new <session> [cmd...]               New tab with session
   tsm mux save <workspace>                          Save current workspace layout
   tsm mux restore <workspace>                      Restore workspace from manifest
+  tsm mux last                                     Focus previous pane
+  tsm mux next                                     Focus next pane
+  tsm mux workspace [name]                         List or switch workspaces
   tsm mux doctor <workspace>                       Diagnose workspace health
   tsm mux sidebar sync <workspace>                 Sync session state to cmux sidebar
   tsm mux setup kitty                              Enable kitty remote control

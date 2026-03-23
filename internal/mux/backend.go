@@ -119,6 +119,12 @@ type Backend interface {
 	// GetTree returns the layout tree for a workspace.
 	GetTree(workspaceID string) (LayoutNode, error)
 
+	// FocusNextPane focuses the next pane in the current tab.
+	FocusNextPane() error
+
+	// FocusPreviousPane focuses the previous pane in the current tab.
+	FocusPreviousPane() error
+
 	// SetStatus sets a key-value status entry (best-effort, no-op if unsupported).
 	SetStatus(key, value string) error
 

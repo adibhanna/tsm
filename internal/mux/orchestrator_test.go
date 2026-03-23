@@ -78,6 +78,14 @@ func (m *mockBackend) ListPaneSurfaces(workspaceID string) ([]string, error) {
 	m.calls = append(m.calls, "ListPaneSurfaces:"+workspaceID)
 	return []string{"surface:1"}, nil
 }
+func (m *mockBackend) FocusNextPane() error {
+	m.calls = append(m.calls, "FocusNextPane")
+	return nil
+}
+func (m *mockBackend) FocusPreviousPane() error {
+	m.calls = append(m.calls, "FocusPreviousPane")
+	return nil
+}
 func (m *mockBackend) SetStatus(key, value string) error {
 	m.calls = append(m.calls, "SetStatus:"+key+"="+value)
 	return nil
