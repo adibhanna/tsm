@@ -1581,41 +1581,39 @@ func printUsage() {
 	fmt.Print(`tsm — terminal session manager
 
 Usage:
-  tsm                      Open interactive TUI (default)
-  tsm tui [--simplified] [--keymap default|palette]
-                           Open interactive TUI
-  tsm palette              Open simplified session palette
-  tsm claude-statusline    Capture Claude Code statusline JSON for TSM previews
-  tsm config install       Install default config into ~/.config/tsm/config.toml
-  tsm attach [name]        Attach to session (smart attach if omitted)
-  tsm toggle               Switch to the previous session
-  tsm detach [name]        Detach current or named session
-  tsm new <name> [cmd...]  Create a new session
-  tsm list                 List active sessions
-  tsm mux open <workspace>  Open workspace from manifest
-  tsm mux save [workspace]  Save current workspace layout
-  tsm mux restore <ws>     Restore workspace from manifest
-  tsm mux split <dir> <s>  Split focused pane with session
-  tsm mux tab new <s>      New tab with session
-  tsm mux doctor <ws>      Diagnose workspace health
-  tsm mux status           Show terminal and backend info
-  tsm doctor               Show runtime diagnostics
-  tsm doctor clean-stale   Remove stale session sockets
-  tsm debug session <name> Show detailed diagnostics for one session
-  tsm rename <old> <new>   Rename a session
-  tsm kill [name...]       Kill current or named sessions
-  tsm version              Show version
-  tsm help                 Show this help
+  tsm                          Open interactive TUI (default)
+  tsm tui [--simplified]       Open interactive TUI
+  tsm palette                  Open simplified session palette
+  tsm attach [name]            Attach to session (smart attach if omitted)
+  tsm toggle                   Switch to the previous session
+  tsm detach [name]            Detach current or named session
+  tsm new <name> [cmd...]      Create a new session
+  tsm list                     List active sessions
+  tsm rename <old> <new>       Rename a session
+  tsm kill [name...]           Kill current or named sessions
+  tsm mux open <workspace>     Open workspace from manifest
+  tsm mux new <workspace>      Create a new workspace manifest
+  tsm mux edit                 Open workspace dir in $EDITOR
+  tsm mux split <dir> <s>      Split focused pane with session
+  tsm mux tab new <s>          New tab with session
+  tsm mux save <workspace>     Save workspace manifest
+  tsm mux restore <workspace>  Restore workspace from manifest
+  tsm mux doctor <workspace>   Diagnose workspace health
+  tsm mux status               Show terminal and backend info
+  tsm mux help                 Show all mux commands
+  tsm doctor                   Show runtime diagnostics
+  tsm doctor clean-stale       Remove stale session sockets
+  tsm debug session <name>     Show diagnostics for one session
+  tsm config install           Install default config
+  tsm claude-statusline        Capture Claude statusline JSON
+  tsm version                  Show version
+  tsm help                     Show this help
 
 Aliases:
-  palette=p  attach=a  detach=d  new=n  list=l,ls  rename=mv  kill=k  mux=m  version=v  help=h
+  palette=p  attach=a  detach=d  new=n  list=l,ls
+  rename=mv  kill=k  mux=m  version=v  help=h
 
 Detach from a session with Ctrl+\
-
-TUI env:
-  TSM_TUI_MODE=full|simplified
-  TSM_TUI_KEYMAP=default|palette
-  TSM_CONFIG_FILE=~/.config/tsm/config.toml
 `)
 }
 
