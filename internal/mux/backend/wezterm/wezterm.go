@@ -217,6 +217,22 @@ func (b *Backend) GetFocusedPane() (mux.Pane, error) {
 	return mux.Pane{ID: paneID, SurfaceID: tabID}, nil
 }
 
+// paneIDForTab resolves a tab ID to the first pane ID in that tab.
+// WezTerm CLI commands like send-text and get-text operate on pane IDs.
+func (b *Backend) paneIDForTab(tabID string) string {
+	panes, err := b.listPanes()
+	if err != nil {
+		return tabID // fallback
+	}
+	tid, _ := strconv.Atoi(tabID)
+	for _, p := range panes {
+		if p.TabID == tid {
+			return strconv.Itoa(p.PaneID)
+		}
+	}
+	return tabID // fallback
+}
+
 // tabIDForPane looks up the tab ID that contains a given pane ID.
 func (b *Backend) tabIDForPane(paneID string) string {
 	panes, err := b.listPanes()
@@ -239,7 +255,7 @@ func (b *Backend) SendText(paneID string, text string) error {
 	if paneID != "" {
 		args = append(args, "--pane-id", paneID)
 	}
-	args = append(args, text)
+	args = append(args, "--", text)
 	_, err := b.run(args...)
 	return err
 }
@@ -247,9 +263,10 @@ func (b *Backend) SendText(paneID string, text string) error {
 func (b *Backend) SendTextToWorkspace(workspaceID, surfaceID, text string) error {
 	args := []string{"cli", "send-text", "--no-paste"}
 	if surfaceID != "" {
-		args = append(args, "--pane-id", surfaceID)
+		// surfaceID is a tab ID — resolve to a pane ID for wezterm cli.
+		args = append(args, "--pane-id", b.paneIDForTab(surfaceID))
 	}
-	args = append(args, text)
+	args = append(args, "--", text)
 	_, err := b.run(args...)
 	return err
 }
@@ -274,7 +291,8 @@ func (b *Backend) ListPaneSurfaces(workspaceID string) ([]string, error) {
 func (b *Backend) ReadScreen(workspaceID, surfaceID string) (string, error) {
 	args := []string{"cli", "get-text"}
 	if surfaceID != "" {
-		args = append(args, "--pane-id", surfaceID)
+		// surfaceID is a tab ID — resolve to a pane ID.
+		args = append(args, "--pane-id", b.paneIDForTab(surfaceID))
 	}
 	out, err := b.run(args...)
 	if err != nil {
