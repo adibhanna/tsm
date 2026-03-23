@@ -144,13 +144,27 @@ func (b *Backend) findOSWindowByWindowID(winID string) (string, error) {
 }
 
 func (b *Backend) SelectWorkspace(id string) error {
-	// id is an OS window ID — use focus-tab to activate a window inside it,
-	// which brings the OS window to the front.
-	_, err := b.run("@", "focus-window", "--match=os_window_id:"+id)
+	// Find a kitty window inside this OS window and focus it.
+	out, err := b.run("@", "ls")
 	if err != nil {
-		return fmt.Errorf("focus-window: %w", err)
+		return nil // Best effort — the new OS window is likely already focused.
 	}
-	return nil
+	var osWindows []kittyOSWindow
+	if err := json.Unmarshal([]byte(out), &osWindows); err != nil {
+		return nil
+	}
+	osID, _ := strconv.Atoi(id)
+	for _, osw := range osWindows {
+		if osw.ID == osID {
+			for _, tab := range osw.Tabs {
+				for _, win := range tab.Windows {
+					_, _ = b.run("@", "focus-window", "--match=id:"+strconv.Itoa(win.ID))
+					return nil
+				}
+			}
+		}
+	}
+	return nil // OS window exists but has no windows yet — that's fine.
 }
 
 // --- Surfaces (kitty tabs) ---
