@@ -37,7 +37,7 @@ func TestDetectTerminal(t *testing.T) {
 			name:     "ghostty",
 			env:      map[string]string{"GHOSTTY_RESOURCES_DIR": "/usr/share/ghostty"},
 			wantName: "ghostty",
-			wantBack: "",
+			wantBack: "ghostty",
 		},
 		{
 			name:     "iterm2 via session id",

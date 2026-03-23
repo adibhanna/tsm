@@ -21,6 +21,7 @@ import (
 	"github.com/adibhanna/tsm/internal/engine"
 	"github.com/adibhanna/tsm/internal/mux"
 	cmuxbackend "github.com/adibhanna/tsm/internal/mux/backend/cmux"
+	ghosttybackend "github.com/adibhanna/tsm/internal/mux/backend/ghostty"
 	kittybackend "github.com/adibhanna/tsm/internal/mux/backend/kitty"
 	"github.com/adibhanna/tsm/internal/session"
 	"github.com/adibhanna/tsm/internal/tui"
@@ -1326,12 +1327,16 @@ func newOrchestrator() (*mux.Orchestrator, error) {
 		backend = cmuxbackend.New()
 	case "kitty":
 		backend = kittybackend.New()
+	case "ghostty":
+		backend = ghosttybackend.New()
 	default:
 		// Try each backend in priority order.
 		if cb := cmuxbackend.New(); cb.Available() {
 			backend = cb
 		} else if kb := kittybackend.New(); kb.Available() {
 			backend = kb
+		} else if gb := ghosttybackend.New(); gb.Available() {
+			backend = gb
 		} else {
 			backend = cmuxbackend.New() // fallback for error message
 		}

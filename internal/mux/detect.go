@@ -30,7 +30,7 @@ func DetectTerminal() Terminal {
 
 	// Ghostty sets GHOSTTY_RESOURCES_DIR.
 	if os.Getenv("GHOSTTY_RESOURCES_DIR") != "" {
-		return Terminal{Name: "ghostty", Backend: ""}
+		return Terminal{Name: "ghostty", Backend: "ghostty"}
 	}
 
 	// iTerm2 sets ITERM_SESSION_ID.
