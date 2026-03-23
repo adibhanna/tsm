@@ -120,7 +120,6 @@ func (b *Backend) SelectWorkspace(id string) error {
 func (b *Backend) CreateSurface(workspaceID string) (mux.Surface, error) {
 	args := []string{"cli", "spawn"}
 	if workspaceID != "" {
-		// Find a window in this workspace to spawn the tab into.
 		panes, err := b.listPanes()
 		if err == nil {
 			for _, p := range panes {
@@ -135,14 +134,25 @@ func (b *Backend) CreateSurface(workspaceID string) (mux.Surface, error) {
 	if err != nil {
 		return mux.Surface{}, fmt.Errorf("spawn tab: %w", err)
 	}
-	id := strings.TrimSpace(out)
-	return mux.Surface{ID: id, WorkspaceID: workspaceID}, nil
+	paneID := strings.TrimSpace(out)
+	// Resolve the tab ID from the pane ID.
+	tabID := b.tabIDForPane(paneID)
+	return mux.Surface{ID: tabID, WorkspaceID: workspaceID}, nil
 }
 
 func (b *Backend) CloseSurface(id string) error {
-	// Close all panes in the tab. Find panes with matching tab ID.
-	_, err := b.run("cli", "kill-pane", "--pane-id", id)
-	return err
+	// id is a tab ID. Find all panes in that tab and kill them.
+	panes, err := b.listPanes()
+	if err != nil {
+		return err
+	}
+	tabID, _ := strconv.Atoi(id)
+	for _, p := range panes {
+		if p.TabID == tabID {
+			_, _ = b.run("cli", "kill-pane", "--pane-id", strconv.Itoa(p.PaneID))
+		}
+	}
+	return nil
 }
 
 // --- Panes ---
@@ -175,8 +185,9 @@ func (b *Backend) SplitPane(workspaceID string, dir mux.Direction) (mux.Pane, er
 	if err != nil {
 		return mux.Pane{}, fmt.Errorf("split-pane: %w", err)
 	}
-	id := strings.TrimSpace(out)
-	return mux.Pane{ID: id, SurfaceID: id}, nil
+	paneID := strings.TrimSpace(out)
+	tabID := b.tabIDForPane(paneID)
+	return mux.Pane{ID: paneID, SurfaceID: tabID}, nil
 }
 
 func (b *Backend) ClosePane(id string) error {
@@ -201,8 +212,24 @@ func (b *Backend) GetFocusedPane() (mux.Pane, error) {
 	if len(clients) == 0 {
 		return mux.Pane{}, fmt.Errorf("no clients found")
 	}
-	id := strconv.Itoa(clients[0].FocusedPaneID)
-	return mux.Pane{ID: id, SurfaceID: id}, nil
+	paneID := strconv.Itoa(clients[0].FocusedPaneID)
+	tabID := b.tabIDForPane(paneID)
+	return mux.Pane{ID: paneID, SurfaceID: tabID}, nil
+}
+
+// tabIDForPane looks up the tab ID that contains a given pane ID.
+func (b *Backend) tabIDForPane(paneID string) string {
+	panes, err := b.listPanes()
+	if err != nil {
+		return paneID // fallback
+	}
+	pid, _ := strconv.Atoi(paneID)
+	for _, p := range panes {
+		if p.PaneID == pid {
+			return strconv.Itoa(p.TabID)
+		}
+	}
+	return paneID // fallback
 }
 
 // --- I/O ---
