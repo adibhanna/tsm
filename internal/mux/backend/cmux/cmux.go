@@ -82,7 +82,7 @@ func (b *Backend) Available() bool {
 	if err != nil {
 		return false
 	}
-	return strings.Contains(out, "pong") || out != ""
+	return strings.Contains(out, "pong")
 }
 
 // UnavailableReason returns a human-readable reason why the backend is unavailable.
@@ -353,9 +353,11 @@ func (b *Backend) GetTree(workspaceID string) (mux.LayoutNode, error) {
 	if err != nil {
 		return mux.LayoutNode{}, fmt.Errorf("tree: %w", err)
 	}
-	// The tree JSON structure varies; return a minimal parse for now.
+	// Intentionally unimplemented for V1: the tree JSON structure varies
+	// across cmux versions and full layout save/restore is not yet needed.
+	// Return a minimal stub so callers don't break.
 	node := mux.LayoutNode{Type: "workspace"}
-	_ = out // TODO: parse full tree structure when needed for save/restore
+	_ = out
 	return node, nil
 }
 
@@ -401,10 +403,19 @@ func (b *Backend) run(args ...string) (string, error) {
 		args = append([]string{"--socket", b.socket}, args...)
 	}
 	cmd := exec.Command(b.bin, args...)
-	cmd.Env = os.Environ()
-	out, err := cmd.CombinedOutput()
+	// Use Output (not CombinedOutput) so stderr warnings don't corrupt
+	// stdout, which we parse as JSON in many callers.
+	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("%s %s: %w: %s", b.bin, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		// If there's an ExitError, include stderr in the error message.
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = strings.TrimSpace(string(ee.Stderr))
+		}
+		if stderr != "" {
+			return "", fmt.Errorf("%s %s: %w: %s", b.bin, strings.Join(args, " "), err, stderr)
+		}
+		return "", fmt.Errorf("%s %s: %w", b.bin, strings.Join(args, " "), err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }

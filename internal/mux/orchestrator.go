@@ -127,7 +127,9 @@ func (o *Orchestrator) Open(workspaceName string) error {
 		time.Sleep(500 * time.Millisecond)
 		for _, job := range jobs {
 			if job.command != "" {
-				_ = o.Backend.SendTextToWorkspace(wsID, job.surfaceRef, job.command+"\n")
+				if err := o.Backend.SendTextToWorkspace(wsID, job.surfaceRef, job.command+"\n"); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to send command to surface %s: %v\n", job.surfaceRef, err)
+				}
 			}
 		}
 	}
@@ -369,10 +371,6 @@ func findNewSurface(oldList, newList []string) string {
 		if !old[s] {
 			return s
 		}
-	}
-	// Fallback: return the last one.
-	if len(newList) > 0 {
-		return newList[len(newList)-1]
 	}
 	return ""
 }

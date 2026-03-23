@@ -60,5 +60,5 @@ func DetectTerminal() Terminal {
 
 // SupportedBackends returns the list of backend names that have implementations.
 func SupportedBackends() []string {
-	return []string{"cmux"}
+	return []string{"cmux", "kitty", "ghostty"}
 }

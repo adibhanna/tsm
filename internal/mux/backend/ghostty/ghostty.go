@@ -14,7 +14,6 @@ package ghostty
 import (
 	"fmt"
 	"os/exec"
-	"regexp"
 	"runtime"
 	"strings"
 
@@ -52,7 +51,7 @@ func (b *Backend) ListWorkspaces() ([]mux.Workspace, error) {
 	ids := parseStringList(out)
 	var ws []mux.Workspace
 	for _, id := range ids {
-		name, _ := osascript(fmt.Sprintf(`tell application "Ghostty" to get name of window id "%s"`, id))
+		name, _ := osascript(fmt.Sprintf(`tell application "Ghostty" to get name of window id "%s"`, sanitizeID(id)))
 		name = strings.TrimSpace(name)
 		if name == "" {
 			name = "window-" + id
@@ -75,10 +74,12 @@ func (b *Backend) CreateWorkspace(name string) (mux.Workspace, error) {
 }
 
 func (b *Backend) SelectWorkspace(id string) error {
-	_, err := osascript(fmt.Sprintf(`tell application "Ghostty" to activate window id "%s"`, id))
+	_, err := osascript(fmt.Sprintf(`tell application "Ghostty" to activate window id "%s"`, sanitizeID(id)))
 	if err != nil {
 		// Fallback: just bring Ghostty to front.
-		_, _ = osascript(`tell application "Ghostty" to activate`)
+		if _, fallbackErr := osascript(`tell application "Ghostty" to activate`); fallbackErr != nil {
+			return fmt.Errorf("select workspace: %w", err)
+		}
 	}
 	return nil
 }
@@ -91,7 +92,7 @@ func (b *Backend) CreateSurface(workspaceID string) (mux.Surface, error) {
 		script = fmt.Sprintf(`tell application "Ghostty"
 			set newTab to new tab in window id "%s"
 			return id of focused terminal of newTab
-		end tell`, workspaceID)
+		end tell`, sanitizeID(workspaceID))
 	} else {
 		script = `tell application "Ghostty"
 			set newTab to new tab in front window
@@ -108,7 +109,7 @@ func (b *Backend) CreateSurface(workspaceID string) (mux.Surface, error) {
 
 func (b *Backend) CloseSurface(id string) error {
 	// Close the tab containing this terminal.
-	_, err := osascript(fmt.Sprintf(`tell application "Ghostty" to close terminal id "%s"`, id))
+	_, err := osascript(fmt.Sprintf(`tell application "Ghostty" to close terminal id "%s"`, sanitizeID(id)))
 	if err != nil {
 		return fmt.Errorf("close surface: %w", err)
 	}
@@ -133,7 +134,7 @@ func (b *Backend) SplitPane(workspaceID string, dir mux.Direction) (mux.Pane, er
 }
 
 func (b *Backend) ClosePane(id string) error {
-	_, err := osascript(fmt.Sprintf(`tell application "Ghostty" to close terminal id "%s"`, id))
+	_, err := osascript(fmt.Sprintf(`tell application "Ghostty" to close terminal id "%s"`, sanitizeID(id)))
 	if err != nil {
 		return fmt.Errorf("close terminal: %w", err)
 	}
@@ -141,7 +142,7 @@ func (b *Backend) ClosePane(id string) error {
 }
 
 func (b *Backend) FocusPane(id string) error {
-	_, err := osascript(fmt.Sprintf(`tell application "Ghostty" to focus terminal id "%s"`, id))
+	_, err := osascript(fmt.Sprintf(`tell application "Ghostty" to focus terminal id "%s"`, sanitizeID(id)))
 	if err != nil {
 		return fmt.Errorf("focus terminal: %w", err)
 	}
@@ -160,46 +161,34 @@ func (b *Backend) GetFocusedPane() (mux.Pane, error) {
 // --- I/O ---
 
 func (b *Backend) SendText(paneID string, text string) error {
+	var target string
+	if paneID != "" {
+		target = fmt.Sprintf(`terminal id "%s"`, sanitizeID(paneID))
+	} else {
+		target = `focused terminal of selected tab of front window`
+	}
+	return sendToTerminal(target, text)
+}
+
+func (b *Backend) SendTextToWorkspace(workspaceID, surfaceID, text string) error {
+	var target string
+	if surfaceID != "" {
+		target = fmt.Sprintf(`terminal id "%s"`, sanitizeID(surfaceID))
+	} else if workspaceID != "" {
+		target = fmt.Sprintf(`focused terminal of selected tab of window id "%s"`, sanitizeID(workspaceID))
+	} else {
+		target = `focused terminal of selected tab of front window`
+	}
+	return sendToTerminal(target, text)
+}
+
+// sendToTerminal sends text (and optionally Enter) to an AppleScript target expression.
+func sendToTerminal(target, text string) error {
 	// Strip trailing \n — we'll send Enter as a separate key event.
 	sendEnter := strings.HasSuffix(text, "\n")
 	text = strings.TrimSuffix(text, "\n")
 
 	escaped := escapeAppleScript(text)
-	var target string
-	if paneID != "" {
-		target = fmt.Sprintf(`terminal id "%s"`, paneID)
-	} else {
-		target = `focused terminal of selected tab of front window`
-	}
-
-	script := fmt.Sprintf(`tell application "Ghostty" to input text %s to %s`, escaped, target)
-	if _, err := osascript(script); err != nil {
-		return fmt.Errorf("input text: %w", err)
-	}
-
-	if sendEnter {
-		script = fmt.Sprintf(`tell application "Ghostty" to send key "enter" to %s`, target)
-		if _, err := osascript(script); err != nil {
-			return fmt.Errorf("send enter: %w", err)
-		}
-	}
-	return nil
-}
-
-func (b *Backend) SendTextToWorkspace(workspaceID, surfaceID, text string) error {
-	sendEnter := strings.HasSuffix(text, "\n")
-	text = strings.TrimSuffix(text, "\n")
-
-	escaped := escapeAppleScript(text)
-	var target string
-	if surfaceID != "" {
-		target = fmt.Sprintf(`terminal id "%s"`, surfaceID)
-	} else if workspaceID != "" {
-		target = fmt.Sprintf(`focused terminal of selected tab of window id "%s"`, workspaceID)
-	} else {
-		target = `focused terminal of selected tab of front window`
-	}
-
 	script := fmt.Sprintf(`tell application "Ghostty" to input text %s to %s`, escaped, target)
 	if _, err := osascript(script); err != nil {
 		return fmt.Errorf("input text: %w", err)
@@ -217,7 +206,7 @@ func (b *Backend) SendTextToWorkspace(workspaceID, surfaceID, text string) error
 func (b *Backend) ListPaneSurfaces(workspaceID string) ([]string, error) {
 	var script string
 	if workspaceID != "" {
-		script = fmt.Sprintf(`tell application "Ghostty" to get id of every terminal of selected tab of window id "%s"`, workspaceID)
+		script = fmt.Sprintf(`tell application "Ghostty" to get id of every terminal of selected tab of window id "%s"`, sanitizeID(workspaceID))
 	} else {
 		script = `tell application "Ghostty" to get id of every terminal of selected tab of front window`
 	}
@@ -283,14 +272,27 @@ func osascript(script string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// escapeAppleScript wraps a string in AppleScript quotes, escaping backslashes and quotes.
+// escapeAppleScript wraps a string in AppleScript quotes, escaping backslashes, quotes, and newlines.
 func escapeAppleScript(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	s = strings.ReplaceAll(s, "\r", `\r`)
 	return `"` + s + `"`
 }
 
-var idRe = regexp.MustCompile(`[A-Za-z0-9_-]+`)
+// sanitizeID strips any characters that aren't alphanumeric, hyphens, or underscores
+// to prevent AppleScript injection via malformed IDs.
+func sanitizeID(id string) string {
+	var b strings.Builder
+	b.Grow(len(id))
+	for _, r := range id {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
 
 // parseStringList parses AppleScript list output like "abc, def, ghi" into string IDs.
 // Ghostty IDs are UUIDs or opaque strings, not just numbers.

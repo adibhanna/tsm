@@ -14,7 +14,6 @@ package kitty
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -73,7 +72,10 @@ type kittyWindow struct {
 	CWD       string `json:"cwd"`
 }
 
-func (b *Backend) ListWorkspaces() ([]mux.Workspace, error) {
+// listAll calls `kitten @ ls`, parses the JSON, and returns the full
+// kitty state as a slice of OS windows. This avoids repeating the
+// run-then-unmarshal pattern in every method that inspects kitty state.
+func (b *Backend) listAll() ([]kittyOSWindow, error) {
 	out, err := b.run("@", "ls")
 	if err != nil {
 		return nil, fmt.Errorf("ls: %w", err)
@@ -81,6 +83,14 @@ func (b *Backend) ListWorkspaces() ([]mux.Workspace, error) {
 	var osWindows []kittyOSWindow
 	if err := json.Unmarshal([]byte(out), &osWindows); err != nil {
 		return nil, fmt.Errorf("parse ls: %w", err)
+	}
+	return osWindows, nil
+}
+
+func (b *Backend) ListWorkspaces() ([]mux.Workspace, error) {
+	osWindows, err := b.listAll()
+	if err != nil {
+		return nil, err
 	}
 	var ws []mux.Workspace
 	for _, w := range osWindows {
@@ -122,12 +132,8 @@ func (b *Backend) CreateWorkspace(name string) (mux.Workspace, error) {
 
 // findOSWindowByWindowID looks up which OS window contains a given kitty window.
 func (b *Backend) findOSWindowByWindowID(winID string) (string, error) {
-	out, err := b.run("@", "ls")
+	osWindows, err := b.listAll()
 	if err != nil {
-		return "", err
-	}
-	var osWindows []kittyOSWindow
-	if err := json.Unmarshal([]byte(out), &osWindows); err != nil {
 		return "", err
 	}
 	targetID, _ := strconv.Atoi(winID)
@@ -145,13 +151,9 @@ func (b *Backend) findOSWindowByWindowID(winID string) (string, error) {
 
 func (b *Backend) SelectWorkspace(id string) error {
 	// Find a kitty window inside this OS window and focus it.
-	out, err := b.run("@", "ls")
+	osWindows, err := b.listAll()
 	if err != nil {
 		return nil // Best effort — the new OS window is likely already focused.
-	}
-	var osWindows []kittyOSWindow
-	if err := json.Unmarshal([]byte(out), &osWindows); err != nil {
-		return nil
 	}
 	osID, _ := strconv.Atoi(id)
 	for _, osw := range osWindows {
@@ -170,10 +172,10 @@ func (b *Backend) SelectWorkspace(id string) error {
 // --- Surfaces (kitty tabs) ---
 
 func (b *Backend) CreateSurface(workspaceID string) (mux.Surface, error) {
+	// Note: kitty's --match=id: matches window (pane) IDs, not OS window IDs.
+	// We don't pass --match here because kitty creates the new tab in the
+	// currently focused OS window by default, which is the correct behavior.
 	args := []string{"@", "launch", "--type=tab"}
-	if workspaceID != "" {
-		args = append(args, "--match=id:"+workspaceID)
-	}
 	out, err := b.run(args...)
 	if err != nil {
 		return mux.Surface{}, fmt.Errorf("launch tab: %w", err)
@@ -223,13 +225,9 @@ func (b *Backend) FocusPane(id string) error {
 }
 
 func (b *Backend) GetFocusedPane() (mux.Pane, error) {
-	out, err := b.run("@", "ls")
+	osWindows, err := b.listAll()
 	if err != nil {
-		return mux.Pane{}, fmt.Errorf("ls: %w", err)
-	}
-	var osWindows []kittyOSWindow
-	if err := json.Unmarshal([]byte(out), &osWindows); err != nil {
-		return mux.Pane{}, fmt.Errorf("parse ls: %w", err)
+		return mux.Pane{}, err
 	}
 	for _, osw := range osWindows {
 		if !osw.IsFocused {
@@ -282,13 +280,9 @@ func (b *Backend) SendTextToWorkspace(workspaceID, surfaceID, text string) error
 }
 
 func (b *Backend) ListPaneSurfaces(workspaceID string) ([]string, error) {
-	out, err := b.run("@", "ls")
+	osWindows, err := b.listAll()
 	if err != nil {
-		return nil, fmt.Errorf("ls: %w", err)
-	}
-	var osWindows []kittyOSWindow
-	if err := json.Unmarshal([]byte(out), &osWindows); err != nil {
-		return nil, fmt.Errorf("parse ls: %w", err)
+		return nil, err
 	}
 	var refs []string
 	for _, osw := range osWindows {
@@ -363,10 +357,19 @@ func (b *Backend) run(args ...string) (string, error) {
 		return "", fmt.Errorf("kitten binary not found")
 	}
 	cmd := exec.Command(b.bin, args...)
-	cmd.Env = os.Environ()
-	out, err := cmd.CombinedOutput()
+	// Use Output (not CombinedOutput) so stderr warnings don't corrupt
+	// stdout, which we parse as JSON in many callers.
+	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("%s %s: %w: %s", b.bin, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		// If there's an ExitError, include stderr in the error message.
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = strings.TrimSpace(string(ee.Stderr))
+		}
+		if stderr != "" {
+			return "", fmt.Errorf("%s %s: %w: %s", b.bin, strings.Join(args, " "), err, stderr)
+		}
+		return "", fmt.Errorf("%s %s: %w", b.bin, strings.Join(args, " "), err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }

@@ -1,7 +1,6 @@
 package mux
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -256,9 +255,4 @@ func TestDetectSessionFromScreen(t *testing.T) {
 			t.Errorf("detectSessionFromScreen(%q) = %q, want %q", tt.screen, got, tt.want)
 		}
 	}
-}
-
-func init() {
-	// Ensure test temp dirs exist.
-	os.MkdirAll(os.TempDir(), 0o755)
 }

@@ -129,12 +129,15 @@ func ListManifests() ([]string, error) {
 
 // ExpandPath expands ~ to the user's home directory.
 func ExpandPath(p string) string {
-	if !strings.HasPrefix(p, "~/") {
+	if p != "~" && !strings.HasPrefix(p, "~/") {
 		return p
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return p
+	}
+	if p == "~" {
+		return home
 	}
 	return filepath.Join(home, p[2:])
 }
@@ -142,6 +145,9 @@ func ExpandPath(p string) string {
 func validateManifest(m *Manifest) error {
 	if m.Name == "" {
 		return fmt.Errorf("manifest name is required")
+	}
+	if strings.ContainsAny(m.Name, "/\\") || strings.Contains(m.Name, "..") || strings.HasPrefix(m.Name, ".") {
+		return fmt.Errorf("manifest name %q contains unsafe characters", m.Name)
 	}
 	if m.Version != 1 {
 		return fmt.Errorf("unsupported manifest version %d", m.Version)
