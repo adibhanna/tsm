@@ -173,6 +173,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.previewCmd()
 		case m.isToggleLayoutKey(msg):
 			return m, m.toggleLayout()
+		case m.isMuxOpenKey(msg):
+			if len(m.workspaceNames) > 0 {
+				m.state = stateMuxOpen
+				m.workspaceCursor = 0
+			} else {
+				m.status = "No workspace manifests found"
+				return m, clearStatusAfter(2 * time.Second)
+			}
 		case m.inlineFilterEnabled() && m.isTextInput(msg):
 			m.filterText += msg.Text
 			m.markVisibleChanged()
@@ -433,6 +441,41 @@ func (m *Model) handleLogScroll(msg tea.KeyPressMsg) bool {
 		m.logOffset++
 	}
 	return true
+}
+
+func (m Model) handleMuxOpenKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.isQuitKey(msg) {
+		return m, tea.Quit
+	}
+
+	switch msg.Code {
+	case tea.KeyEscape:
+		m.state = stateNormal
+		return m, nil
+
+	case tea.KeyEnter:
+		if m.workspaceCursor < len(m.workspaceNames) {
+			m.muxOpenTarget = m.workspaceNames[m.workspaceCursor]
+			m.state = stateNormal
+			return m, tea.Quit
+		}
+		m.state = stateNormal
+		return m, nil
+
+	default:
+		switch {
+		case m.isMoveUpKey(msg):
+			if m.workspaceCursor > 0 {
+				m.workspaceCursor--
+			}
+		case m.isMoveDownKey(msg):
+			if m.workspaceCursor < len(m.workspaceNames)-1 {
+				m.workspaceCursor++
+			}
+		}
+	}
+
+	return m, nil
 }
 
 func (m *Model) ensureVisible() {

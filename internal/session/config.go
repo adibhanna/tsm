@@ -36,9 +36,19 @@ func DefaultConfig() Config {
 		dir = "/tmp/" + suffix
 	}
 
+	// Migrate old log directory from inside socket dir to sibling.
+	// Previously LogDir was dir+"/logs" which collided with session name "logs".
+	oldLogDir := dir + "/logs"
+	newLogDir := dir + ".logs"
+	if fi, err := os.Stat(oldLogDir); err == nil && fi.IsDir() {
+		if _, err := os.Stat(newLogDir); os.IsNotExist(err) {
+			os.Rename(oldLogDir, newLogDir)
+		}
+	}
+
 	return Config{
 		SocketDir: dir,
-		LogDir:    dir + "/logs",
+		LogDir:    newLogDir,
 	}
 }
 

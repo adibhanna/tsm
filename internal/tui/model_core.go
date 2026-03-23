@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/adibhanna/tsm/internal/engine"
+	"github.com/adibhanna/tsm/internal/mux"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -31,6 +32,7 @@ const (
 	stateFilter
 	stateNewSession
 	stateRenameSession
+	stateMuxOpen
 )
 
 type sortMode int
@@ -103,6 +105,12 @@ type renameSessionMsg struct {
 	err     error
 }
 
+type muxInfoMsg struct {
+	terminal   string
+	backend    string
+	workspaces []string
+}
+
 // Commands
 
 func fetchSessionsCmd() tea.Msg {
@@ -150,6 +158,16 @@ func detachOneCmd(name string) tea.Cmd {
 	}
 }
 
+func fetchMuxInfoCmd() tea.Msg {
+	term := mux.DetectTerminal()
+	workspaces, _ := mux.ListManifests()
+	return muxInfoMsg{
+		terminal:   term.Name,
+		backend:    term.Backend,
+		workspaces: workspaces,
+	}
+}
+
 func clearStatusAfter(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg {
 		return statusClearMsg{}
@@ -193,6 +211,13 @@ type Model struct {
 	newSessionName string
 	renameOldName  string
 	renameNewName  string
+
+	// Mux workspace
+	muxTerminal     string   // detected terminal name
+	muxBackend      string   // detected backend name
+	workspaceNames  []string // available workspace manifests
+	workspaceCursor int
+	muxOpenTarget   string // workspace to open after quit
 
 	// Activity log
 	logLines  []string
@@ -241,6 +266,10 @@ func NewModel(opts ...Options) Model {
 
 func (m Model) AttachTarget() string {
 	return m.attachTarget
+}
+
+func (m Model) MuxOpenTarget() string {
+	return m.muxOpenTarget
 }
 
 func (m Model) Options() Options {
@@ -501,7 +530,7 @@ func (m *Model) clampCursor() {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(fetchSessionsCmd, autoRefreshCmd())
+	return tea.Batch(fetchSessionsCmd, fetchMuxInfoCmd, autoRefreshCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -623,6 +652,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(fetchSessionsCmd, clearStatusAfter(3*time.Second))
 
+	case muxInfoMsg:
+		m.muxTerminal = msg.terminal
+		m.muxBackend = msg.backend
+		m.workspaceNames = msg.workspaces
+
 	case statusClearMsg:
 		m.status = ""
 
@@ -645,6 +679,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.state == stateRenameSession {
 			return m.handleRenameSessionKey(msg)
+		}
+		if m.state == stateMuxOpen {
+			return m.handleMuxOpenKey(msg)
 		}
 		return m.handleKey(msg)
 	}

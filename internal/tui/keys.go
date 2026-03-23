@@ -92,6 +92,14 @@ func (m Model) isToggleLayoutKey(msg tea.KeyPressMsg) bool {
 	return m.matchesAction(ActionToggleLayout, msg)
 }
 
+func (m Model) isMuxOpenKey(msg tea.KeyPressMsg) bool {
+	return m.matchesAction(ActionMuxOpen, msg)
+}
+
+func (m Model) muxOpenKeyLabel() string {
+	return m.actionLabel(ActionMuxOpen)
+}
+
 func (m Model) isTextInput(msg tea.KeyPressMsg) bool {
 	return msg.Text != "" && !msg.Mod.Contains(tea.ModCtrl)
 }
