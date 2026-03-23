@@ -160,33 +160,56 @@ func (b *Backend) GetFocusedPane() (mux.Pane, error) {
 // --- I/O ---
 
 func (b *Backend) SendText(paneID string, text string) error {
+	// Strip trailing \n — we'll send Enter as a separate key event.
+	sendEnter := strings.HasSuffix(text, "\n")
+	text = strings.TrimSuffix(text, "\n")
+
 	escaped := escapeAppleScript(text)
-	var script string
+	var target string
 	if paneID != "" {
-		script = fmt.Sprintf(`tell application "Ghostty" to input text %s to terminal id "%s"`, escaped, paneID)
+		target = fmt.Sprintf(`terminal id "%s"`, paneID)
 	} else {
-		script = fmt.Sprintf(`tell application "Ghostty" to input text %s to focused terminal of selected tab of front window`, escaped)
+		target = `focused terminal of selected tab of front window`
 	}
-	_, err := osascript(script)
-	if err != nil {
+
+	script := fmt.Sprintf(`tell application "Ghostty" to input text %s to %s`, escaped, target)
+	if _, err := osascript(script); err != nil {
 		return fmt.Errorf("input text: %w", err)
+	}
+
+	if sendEnter {
+		script = fmt.Sprintf(`tell application "Ghostty" to send key "enter" to %s`, target)
+		if _, err := osascript(script); err != nil {
+			return fmt.Errorf("send enter: %w", err)
+		}
 	}
 	return nil
 }
 
 func (b *Backend) SendTextToWorkspace(workspaceID, surfaceID, text string) error {
+	sendEnter := strings.HasSuffix(text, "\n")
+	text = strings.TrimSuffix(text, "\n")
+
 	escaped := escapeAppleScript(text)
-	var script string
+	var target string
 	if surfaceID != "" {
-		script = fmt.Sprintf(`tell application "Ghostty" to input text %s to terminal id "%s"`, escaped, surfaceID)
+		target = fmt.Sprintf(`terminal id "%s"`, surfaceID)
 	} else if workspaceID != "" {
-		script = fmt.Sprintf(`tell application "Ghostty" to input text %s to focused terminal of selected tab of window id "%s"`, escaped, workspaceID)
+		target = fmt.Sprintf(`focused terminal of selected tab of window id "%s"`, workspaceID)
 	} else {
-		script = fmt.Sprintf(`tell application "Ghostty" to input text %s to focused terminal of selected tab of front window`, escaped)
+		target = `focused terminal of selected tab of front window`
 	}
-	_, err := osascript(script)
-	if err != nil {
+
+	script := fmt.Sprintf(`tell application "Ghostty" to input text %s to %s`, escaped, target)
+	if _, err := osascript(script); err != nil {
 		return fmt.Errorf("input text: %w", err)
+	}
+
+	if sendEnter {
+		script = fmt.Sprintf(`tell application "Ghostty" to send key "enter" to %s`, target)
+		if _, err := osascript(script); err != nil {
+			return fmt.Errorf("send enter: %w", err)
+		}
 	}
 	return nil
 }
