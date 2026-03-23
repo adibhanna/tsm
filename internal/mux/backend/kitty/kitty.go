@@ -85,6 +85,13 @@ func (b *Backend) ListWorkspaces() ([]mux.Workspace, error) {
 	var ws []mux.Workspace
 	for _, w := range osWindows {
 		name := w.WMName
+		// Try the active tab's title as a more useful name.
+		for _, tab := range w.Tabs {
+			if tab.IsActive && tab.Title != "" {
+				name = tab.Title
+				break
+			}
+		}
 		if name == "" {
 			name = fmt.Sprintf("window-%d", w.ID)
 		}
@@ -97,14 +104,43 @@ func (b *Backend) ListWorkspaces() ([]mux.Workspace, error) {
 }
 
 func (b *Backend) CreateWorkspace(name string) (mux.Workspace, error) {
-	// kitty: launch a new OS window.
+	// kitty: launch a new OS window. Returns the kitty window ID inside it.
 	out, err := b.run("@", "launch", "--type=os-window", "--title="+name)
 	if err != nil {
 		return mux.Workspace{}, fmt.Errorf("launch os-window: %w", err)
 	}
-	// Output is the new window ID.
-	id := strings.TrimSpace(out)
-	return mux.Workspace{ID: id, Name: name}, nil
+	winID := strings.TrimSpace(out)
+
+	// Find which OS window contains this kitty window.
+	osWinID, err := b.findOSWindowByWindowID(winID)
+	if err != nil {
+		// Fallback: use the window ID directly.
+		return mux.Workspace{ID: winID, Name: name}, nil
+	}
+	return mux.Workspace{ID: osWinID, Name: name}, nil
+}
+
+// findOSWindowByWindowID looks up which OS window contains a given kitty window.
+func (b *Backend) findOSWindowByWindowID(winID string) (string, error) {
+	out, err := b.run("@", "ls")
+	if err != nil {
+		return "", err
+	}
+	var osWindows []kittyOSWindow
+	if err := json.Unmarshal([]byte(out), &osWindows); err != nil {
+		return "", err
+	}
+	targetID, _ := strconv.Atoi(winID)
+	for _, osw := range osWindows {
+		for _, tab := range osw.Tabs {
+			for _, win := range tab.Windows {
+				if win.ID == targetID {
+					return strconv.Itoa(osw.ID), nil
+				}
+			}
+		}
+	}
+	return "", fmt.Errorf("OS window not found for window %s", winID)
 }
 
 func (b *Backend) SelectWorkspace(id string) error {
