@@ -45,7 +45,7 @@ Use it when you want:
 For splits and workspaces, use `tsm mux` to orchestrate your terminal's native split system:
 
 - `tsm mux open dev` opens a workspace with splits and sessions from a TOML manifest
-- supports **cmux**, **kitty**, and **Ghostty** as backends (auto-detected)
+- supports **cmux**, **kitty**, **Ghostty**, and **WezTerm** as backends (auto-detected)
 - each pane is a real native terminal surface with full GPU rendering, ligatures, scrollback
 - no VT re-emulation like tmux/zellij
 
@@ -106,8 +106,9 @@ tsm mux status                          Show terminal, backend, workspace info
 | cmux     | cmux    | `CMUX_SOCKET_PATH` | yes | yes | yes |
 | kitty    | kitty   | `KITTY_PID` | yes | yes | no |
 | Ghostty  | ghostty | `GHOSTTY_RESOURCES_DIR` | yes | yes | no |
+| WezTerm  | wezterm | `WEZTERM_UNIX_SOCKET` | yes | yes | no |
 
-Override with `TSM_MUX_BACKEND=cmux` (or `kitty`, `ghostty`).
+Override with `TSM_MUX_BACKEND=cmux` (or `kitty`, `ghostty`, `wezterm`).
 
 ### TUI workspace picker
 
