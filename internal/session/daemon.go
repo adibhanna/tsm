@@ -694,7 +694,9 @@ func ensureFishIntegration(cfg Config, name string, shortcuts shellShortcuts, or
 			src := filepath.Join(origFishDir, sub)
 			dst := filepath.Join(configDir, sub)
 			// Remove any stale symlink from a previous session.
-			os.Remove(dst)
+			if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+				return "", fmt.Errorf("remove stale fish %s: %w", sub, err)
+			}
 			if _, err := os.Stat(src); err == nil {
 				if err := os.Symlink(src, dst); err != nil {
 					return "", fmt.Errorf("symlink fish %s: %w", sub, err)

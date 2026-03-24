@@ -236,6 +236,63 @@ func TestBuildDaemonEnvAddsFishIntegration(t *testing.T) {
 	}
 }
 
+func TestFishIntegrationSymlinksConfdFunctionsCompletions(t *testing.T) {
+	dir := t.TempDir()
+	xdg := filepath.Join(dir, "xdg")
+	fishDir := filepath.Join(xdg, "fish")
+
+	// Create the three subdirectories in the user's fish config.
+	for _, sub := range []string{"conf.d", "functions", "completions"} {
+		if err := os.MkdirAll(filepath.Join(fishDir, sub), 0750); err != nil {
+			t.Fatalf("mkdir %s: %v", sub, err)
+		}
+	}
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	cfg := Config{SocketDir: t.TempDir()}
+	_, err := buildDaemonEnv(cfg, "symtest", "/opt/homebrew/bin/fish", nil)
+	if err != nil {
+		t.Fatalf("buildDaemonEnv: %v", err)
+	}
+
+	configDir := filepath.Join(shellIntegrationDir(cfg, "fish", "symtest"), "fish")
+	for _, sub := range []string{"conf.d", "functions", "completions"} {
+		link := filepath.Join(configDir, sub)
+		target, err := os.Readlink(link)
+		if err != nil {
+			t.Fatalf("readlink %s: %v", sub, err)
+		}
+		want := filepath.Join(fishDir, sub)
+		if target != want {
+			t.Fatalf("symlink %s points to %q, want %q", sub, target, want)
+		}
+	}
+}
+
+func TestFishIntegrationSkipsSymlinksWhenSubdirsAbsent(t *testing.T) {
+	dir := t.TempDir()
+	xdg := filepath.Join(dir, "xdg")
+	// Create the fish dir but NOT conf.d/functions/completions.
+	if err := os.MkdirAll(filepath.Join(xdg, "fish"), 0750); err != nil {
+		t.Fatalf("mkdir xdg fish: %v", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	cfg := Config{SocketDir: t.TempDir()}
+	_, err := buildDaemonEnv(cfg, "nosubdirs", "/opt/homebrew/bin/fish", nil)
+	if err != nil {
+		t.Fatalf("buildDaemonEnv: %v", err)
+	}
+
+	configDir := filepath.Join(shellIntegrationDir(cfg, "fish", "nosubdirs"), "fish")
+	for _, sub := range []string{"conf.d", "functions", "completions"} {
+		link := filepath.Join(configDir, sub)
+		if _, err := os.Lstat(link); !os.IsNotExist(err) {
+			t.Fatalf("expected no symlink for %s when source absent, but got err=%v", sub, err)
+		}
+	}
+}
+
 func TestBuildDaemonEnvPreservesOriginalXDGInsideSession(t *testing.T) {
 	dir := t.TempDir()
 	orig := filepath.Join(dir, "orig-xdg")
