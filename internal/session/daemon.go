@@ -596,10 +596,6 @@ func buildDaemonEnv(cfg Config, name, shell string, shellCmd []string) ([]string
 		env = append(env, "TSM_SESSION_FILE="+sessionNameFilePath(cfg, mode, name))
 		env = append(env, "TSM_SHELL_INTEGRATION=bash")
 	case "fish":
-		dir, err := ensureFishIntegration(cfg, name, shortcuts)
-		if err != nil {
-			return nil, err
-		}
 		origXDG := os.Getenv("TSM_ORIG_XDG_CONFIG_HOME")
 		if origXDG == "" {
 			origXDG = os.Getenv("XDG_CONFIG_HOME")
@@ -609,6 +605,10 @@ func buildDaemonEnv(cfg Config, name, shell string, shellCmd []string) ([]string
 			if home != "" {
 				origXDG = filepath.Join(home, ".config")
 			}
+		}
+		dir, err := ensureFishIntegration(cfg, name, shortcuts, origXDG)
+		if err != nil {
+			return nil, err
 		}
 		if origXDG != "" {
 			env = append(env, "TSM_ORIG_XDG_CONFIG_HOME="+origXDG)
@@ -673,7 +673,7 @@ func ensureBashIntegration(cfg Config, name string, shortcuts shellShortcuts) er
 	return nil
 }
 
-func ensureFishIntegration(cfg Config, name string, shortcuts shellShortcuts) (string, error) {
+func ensureFishIntegration(cfg Config, name string, shortcuts shellShortcuts, origXDG string) (string, error) {
 	dir := shellIntegrationDir(cfg, "fish", name)
 	configDir := filepath.Join(dir, "fish")
 	if err := os.MkdirAll(configDir, 0750); err != nil {
@@ -684,6 +684,25 @@ func ensureFishIntegration(cfg Config, name string, shortcuts shellShortcuts) (s
 	}
 	if err := os.WriteFile(filepath.Join(configDir, "config.fish"), []byte(renderFishConfigShim(shortcuts)), 0640); err != nil {
 		return "", fmt.Errorf("write fish config: %w", err)
+	}
+	// Symlink conf.d, functions, and completions from the user's original
+	// fish config so that plugins (e.g. starship) and custom functions load
+	// normally even though XDG_CONFIG_HOME has been redirected.
+	if origXDG != "" {
+		origFishDir := filepath.Join(origXDG, "fish")
+		for _, sub := range []string{"conf.d", "functions", "completions"} {
+			src := filepath.Join(origFishDir, sub)
+			dst := filepath.Join(configDir, sub)
+			// Remove any stale symlink from a previous session.
+			if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+				return "", fmt.Errorf("remove stale fish %s: %w", sub, err)
+			}
+			if _, err := os.Stat(src); err == nil {
+				if err := os.Symlink(src, dst); err != nil {
+					return "", fmt.Errorf("symlink fish %s: %w", sub, err)
+				}
+			}
+		}
 	}
 	return dir, nil
 }
