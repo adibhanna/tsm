@@ -53,6 +53,8 @@ func cmdProject() {
 		cmdProjectAdd()
 	case "remove", "rm":
 		cmdProjectRemove()
+	case "pick":
+		cmdProjectPick()
 	case "next":
 		cmdProjectNav(+1)
 	case "prev":
@@ -388,6 +390,55 @@ func cmdProjectRemove() {
 	fmt.Printf("Removed worktree %q from project %q\n", branch, name)
 }
 
+func cmdProjectPick() {
+	// List all projects and their worktrees for the user to pick from.
+	names, err := project.List()
+	if err != nil || len(names) == 0 {
+		fmt.Fprintln(os.Stderr, "No projects configured. Run 'tsm project init [path]' to create one.")
+		os.Exit(1)
+	}
+
+	// Build a simple numbered list for selection.
+	type entry struct {
+		project string
+		branch  string
+	}
+	var entries []entry
+	for _, name := range names {
+		cfg, err := project.Load(name)
+		if err != nil {
+			continue
+		}
+		var worktrees []project.Worktree
+		if len(cfg.Trees) > 0 {
+			for _, e := range cfg.Trees {
+				worktrees = append(worktrees, project.Worktree{Path: e.Path, Branch: e.Branch})
+			}
+		} else {
+			worktrees, _ = project.DetectWorktrees(cfg.Root)
+		}
+		for _, wt := range worktrees {
+			if wt.Bare {
+				continue
+			}
+			entries = append(entries, entry{project: name, branch: wt.Branch})
+		}
+	}
+
+	if len(entries) == 0 {
+		fmt.Fprintln(os.Stderr, "No worktrees found in any project.")
+		os.Exit(1)
+	}
+
+	// Print list and let user pick.
+	fmt.Println("Worktrees:")
+	for i, e := range entries {
+		fmt.Printf("  %d) %s:%s\n", i+1, e.project, e.branch)
+	}
+	fmt.Printf("\nUse the TUI (press %s) for interactive selection.\n", "p")
+	fmt.Println("Or run: tsm project open <name> [branch]")
+}
+
 func cmdProjectNav(direction int) {
 	orch, err := newOrchestrator()
 	if err != nil {
@@ -547,6 +598,7 @@ Usage:
   tsm project close <name> [branch]       Close all (or one) worktree sessions
   tsm project add <name> <branch> [path]  Add a new worktree
   tsm project remove <name> <branch>      Remove a worktree and its sessions
+  tsm project pick                        Interactive worktree picker
   tsm project next                        Focus next tab
   tsm project prev                        Focus previous tab
   tsm project sidebar sync <name>         Sync agent status to sidebar

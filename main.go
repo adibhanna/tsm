@@ -715,6 +715,26 @@ func launchTUI(opts tui.Options) {
 			os.Exit(1)
 		}
 	}
+
+	// If the user picked a project worktree, run tsm project open.
+	type projectPicker interface {
+		ProjectPickTarget() string
+	}
+	if m, ok := finalModel.(projectPicker); ok && m.ProjectPickTarget() != "" {
+		exe, err := os.Executable()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		cmd := exec.Command(exe, "project", "open", m.ProjectPickTarget())
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error opening project: %v\n", err)
+			os.Exit(1)
+		}
+	}
 }
 
 func runCommand(name string, args ...string) error {

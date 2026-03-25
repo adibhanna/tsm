@@ -156,6 +156,18 @@ func (m Model) fullView() tea.View {
 			lines = append(lines, prefix+name)
 		}
 		previewContent = clampLines(strings.Join(lines, "\n"), ch)
+	} else if m.state == stateProjectPick {
+		previewTitleLeft = " Worktrees "
+		previewTitleRight = " enter:open esc:cancel "
+		var lines []string
+		for i, item := range m.projectWorktrees {
+			prefix := "  "
+			if i == m.projectCursor {
+				prefix = "> "
+			}
+			lines = append(lines, prefix+item.Project+":"+item.Branch)
+		}
+		previewContent = clampLines(strings.Join(lines, "\n"), ch)
 	} else if selected.AgentKind != "" {
 		previewContent = m.renderAgentPreview(selected, pw, ch)
 	} else {
@@ -237,18 +249,29 @@ func (m Model) simplifiedView() tea.View {
 	titleLeft := " sessions "
 	titleRight := ""
 
-	if m.state == stateMuxOpen {
-		titleLeft = " workspaces "
-		titleRight = " enter:open esc:cancel "
-		var wsLines []string
-		for i, name := range m.workspaceNames {
-			prefix := "  "
-			if i == m.workspaceCursor {
-				prefix = "> "
+	if m.state == stateMuxOpen || m.state == stateProjectPick {
+		var pickerLines []string
+		if m.state == stateMuxOpen {
+			titleLeft = " workspaces "
+			for i, name := range m.workspaceNames {
+				prefix := "  "
+				if i == m.workspaceCursor {
+					prefix = "> "
+				}
+				pickerLines = append(pickerLines, prefix+name)
 			}
-			wsLines = append(wsLines, prefix+name)
+		} else {
+			titleLeft = " worktrees "
+			for i, item := range m.projectWorktrees {
+				prefix := "  "
+				if i == m.projectCursor {
+					prefix = "> "
+				}
+				pickerLines = append(pickerLines, prefix+item.Project+":"+item.Branch)
+			}
 		}
-		listContent := clampLines(strings.Join(wsLines, "\n"), rowsHeight)
+		titleRight = " enter:open esc:cancel "
+		listContent := clampLines(strings.Join(pickerLines, "\n"), rowsHeight)
 		bodyContent := clampLines(listContent, contentHeight)
 
 		pane := listBorderStyle.
@@ -621,6 +644,9 @@ func (m Model) renderHelp() string {
 
 	if m.state == stateMuxOpen {
 		return helpStyle.Render(" Select workspace: ") + helpKeyStyle.Render("↑↓") + helpStyle.Render(" nav | Enter open | Esc cancel")
+	}
+	if m.state == stateProjectPick {
+		return helpStyle.Render(" Select worktree: ") + helpKeyStyle.Render("↑↓") + helpStyle.Render(" nav | Enter open | Esc cancel")
 	}
 
 	if m.state == stateConfirmKill {

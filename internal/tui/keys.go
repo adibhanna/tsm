@@ -100,6 +100,14 @@ func (m Model) muxOpenKeyLabel() string {
 	return m.actionLabel(ActionMuxOpen)
 }
 
+func (m Model) isProjectPickKey(msg tea.KeyPressMsg) bool {
+	return m.matchesAction(ActionProjectPick, msg)
+}
+
+func (m Model) projectPickKeyLabel() string {
+	return m.actionLabel(ActionProjectPick)
+}
+
 func (m Model) isTextInput(msg tea.KeyPressMsg) bool {
 	return msg.Text != "" && !msg.Mod.Contains(tea.ModCtrl)
 }

@@ -32,6 +32,7 @@ const (
 	ActionLogUp           Action = "log_up"
 	ActionLogDown         Action = "log_down"
 	ActionMuxOpen         Action = "mux_open"
+	ActionProjectPick    Action = "project_pick"
 )
 
 var allActions = []Action{
@@ -56,6 +57,7 @@ var allActions = []Action{
 	ActionLogUp,
 	ActionLogDown,
 	ActionMuxOpen,
+	ActionProjectPick,
 }
 
 var actionAliases = map[string]Action{
@@ -88,6 +90,8 @@ var actionAliases = map[string]Action{
 	"toggle_select_all": ActionToggleSelectAll,
 	"mux_open":          ActionMuxOpen,
 	"workspace":         ActionMuxOpen,
+	"project_pick":      ActionProjectPick,
+	"project":           ActionProjectPick,
 }
 
 type KeyBinding struct {
@@ -181,6 +185,7 @@ func DefaultBindings(keymap Keymap) Bindings {
 		mustSet(ActionFilter, "ctrl+f")
 		mustSet(ActionSort, "ctrl+s")
 		mustSet(ActionMuxOpen, "ctrl+w")
+		mustSet(ActionProjectPick, "ctrl+o")
 		mustSet(ActionQuit, "q")
 	default:
 		mustSet(ActionToggleSelect, "space")
@@ -193,6 +198,7 @@ func DefaultBindings(keymap Keymap) Bindings {
 		mustSet(ActionFilter, "/")
 		mustSet(ActionSort, "s")
 		mustSet(ActionMuxOpen, "w")
+		mustSet(ActionProjectPick, "p")
 		mustSet(ActionQuit, "q")
 	}
 

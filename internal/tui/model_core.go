@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/adibhanna/tsm/internal/engine"
 	"github.com/adibhanna/tsm/internal/mux"
+	"github.com/adibhanna/tsm/internal/project"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -33,6 +34,7 @@ const (
 	stateNewSession
 	stateRenameSession
 	stateMuxOpen
+	stateProjectPick
 )
 
 type sortMode int
@@ -111,6 +113,17 @@ type muxInfoMsg struct {
 	workspaces []string
 }
 
+// projectWorktreeItem represents a worktree in the project picker.
+type projectWorktreeItem struct {
+	Project string // project config name
+	Branch  string // branch name (display)
+	TabName string // formatted tab name for opening
+}
+
+type projectPickMsg struct {
+	items []projectWorktreeItem
+}
+
 // Commands
 
 func fetchSessionsCmd() tea.Msg {
@@ -156,6 +169,36 @@ func detachOneCmd(name string) tea.Cmd {
 		err := engine.DetachSession(name)
 		return detachOneResultMsg{name: name, err: err}
 	}
+}
+
+func fetchProjectWorktreesCmd() tea.Msg {
+	names, _ := project.List()
+	var items []projectWorktreeItem
+	for _, name := range names {
+		cfg, err := project.Load(name)
+		if err != nil {
+			continue
+		}
+		var worktrees []project.Worktree
+		if len(cfg.Trees) > 0 {
+			for _, e := range cfg.Trees {
+				worktrees = append(worktrees, project.Worktree{Path: e.Path, Branch: e.Branch})
+			}
+		} else {
+			worktrees, _ = project.DetectWorktrees(cfg.Root)
+		}
+		for _, wt := range worktrees {
+			if wt.Bare {
+				continue
+			}
+			items = append(items, projectWorktreeItem{
+				Project: name,
+				Branch:  wt.Branch,
+				TabName: name + ":" + project.SanitizeBranch(wt.Branch),
+			})
+		}
+	}
+	return projectPickMsg{items: items}
 }
 
 func fetchMuxInfoCmd() tea.Msg {
@@ -219,6 +262,11 @@ type Model struct {
 	workspaceCursor int
 	muxOpenTarget   string // workspace to open after quit
 
+	// Project worktree picker
+	projectWorktrees []projectWorktreeItem
+	projectCursor    int
+	projectPickTarget string // "project:branch" to open after quit
+
 	// Activity log
 	logLines  []string
 	logOffset int
@@ -270,6 +318,10 @@ func (m Model) AttachTarget() string {
 
 func (m Model) MuxOpenTarget() string {
 	return m.muxOpenTarget
+}
+
+func (m Model) ProjectPickTarget() string {
+	return m.projectPickTarget
 }
 
 func (m Model) Options() Options {
@@ -530,7 +582,7 @@ func (m *Model) clampCursor() {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(fetchSessionsCmd, fetchMuxInfoCmd, autoRefreshCmd())
+	return tea.Batch(fetchSessionsCmd, fetchMuxInfoCmd, fetchProjectWorktreesCmd, autoRefreshCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -657,6 +709,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.muxBackend = msg.backend
 		m.workspaceNames = msg.workspaces
 
+	case projectPickMsg:
+		m.projectWorktrees = msg.items
+
 	case statusClearMsg:
 		m.status = ""
 
@@ -682,6 +737,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.state == stateMuxOpen {
 			return m.handleMuxOpenKey(msg)
+		}
+		if m.state == stateProjectPick {
+			return m.handleProjectPickKey(msg)
 		}
 		return m.handleKey(msg)
 	}

@@ -181,6 +181,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.status = "No workspace manifests found"
 				return m, clearStatusAfter(2 * time.Second)
 			}
+		case m.isProjectPickKey(msg):
+			if len(m.projectWorktrees) > 0 {
+				m.state = stateProjectPick
+				m.projectCursor = 0
+			} else {
+				m.status = "No projects configured"
+				return m, clearStatusAfter(2 * time.Second)
+			}
 		case m.inlineFilterEnabled() && m.isTextInput(msg):
 			m.filterText += msg.Text
 			m.markVisibleChanged()
@@ -471,6 +479,42 @@ func (m Model) handleMuxOpenKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case m.isMoveDownKey(msg):
 			if m.workspaceCursor < len(m.workspaceNames)-1 {
 				m.workspaceCursor++
+			}
+		}
+	}
+
+	return m, nil
+}
+
+func (m Model) handleProjectPickKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.isQuitKey(msg) {
+		return m, tea.Quit
+	}
+
+	switch msg.Code {
+	case tea.KeyEscape:
+		m.state = stateNormal
+		return m, nil
+
+	case tea.KeyEnter:
+		if m.projectCursor < len(m.projectWorktrees) {
+			item := m.projectWorktrees[m.projectCursor]
+			m.projectPickTarget = item.Project
+			m.state = stateNormal
+			return m, tea.Quit
+		}
+		m.state = stateNormal
+		return m, nil
+
+	default:
+		switch {
+		case m.isMoveUpKey(msg):
+			if m.projectCursor > 0 {
+				m.projectCursor--
+			}
+		case m.isMoveDownKey(msg):
+			if m.projectCursor < len(m.projectWorktrees)-1 {
+				m.projectCursor++
 			}
 		}
 	}
