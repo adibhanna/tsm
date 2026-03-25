@@ -4,3 +4,4 @@ dist/
 ghostty/
 .ghostty-prefix/
 zig-local/
+demo/

@@ -82,7 +82,7 @@ func (b *Backend) Available() bool {
 	if err != nil {
 		return false
 	}
-	return strings.Contains(out, "pong")
+	return strings.EqualFold(strings.TrimSpace(out), "pong")
 }
 
 // UnavailableReason returns a human-readable reason why the backend is unavailable.
