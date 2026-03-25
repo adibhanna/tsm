@@ -20,9 +20,7 @@ func SidebarSync(backend Backend, sessCfg session.Config, workspaceName string) 
 	var sessionNames []string
 	for _, surf := range manifest.Surface {
 		sessionNames = append(sessionNames, surf.Session)
-		for _, sp := range surf.Split {
-			sessionNames = append(sessionNames, sp.Session)
-		}
+		sessionNames = append(sessionNames, collectManifestSplitSessions(surf.Split)...)
 	}
 
 	// Fetch live sessions and their process/agent info.
@@ -66,6 +64,93 @@ func SidebarSync(backend Backend, sessCfg session.Config, workspaceName string) 
 
 	// Set overall workspace status.
 	_ = backend.SetStatus("tsm", fmt.Sprintf("%d/%d sessions live", live, total))
+
+	return nil
+}
+
+// collectManifestSplitSessions recursively collects session names from nested splits.
+func collectManifestSplitSessions(splits []ManifestSplit) []string {
+	var names []string
+	for _, sp := range splits {
+		names = append(names, sp.Session)
+		if len(sp.Split) > 0 {
+			names = append(names, collectManifestSplitSessions(sp.Split)...)
+		}
+	}
+	return names
+}
+
+// SidebarSyncManifests syncs agent status for multiple manifests (e.g. all
+// worktrees in a project). It fetches process info once for all sessions,
+// then pushes per-workspace status to the sidebar.
+func SidebarSyncManifests(backend Backend, sessCfg session.Config, manifests []*Manifest) error {
+	// Collect all sessions across all manifests, grouped by workspace.
+	type wsInfo struct {
+		name     string
+		sessions []string
+	}
+	var workspaces []wsInfo
+	var allSessionNames []string
+	for _, m := range manifests {
+		var sessions []string
+		for _, surf := range m.Surface {
+			sessions = append(sessions, surf.Session)
+			sessions = append(sessions, collectManifestSplitSessions(surf.Split)...)
+		}
+		workspaces = append(workspaces, wsInfo{name: m.Name, sessions: sessions})
+		allSessionNames = append(allSessionNames, sessions...)
+	}
+
+	// Fetch live sessions once.
+	allSessions, err := session.ListSessions(sessCfg)
+	if err != nil {
+		return fmt.Errorf("list sessions: %w", err)
+	}
+
+	// Filter to project sessions.
+	nameSet := make(map[string]bool, len(allSessionNames))
+	for _, n := range allSessionNames {
+		nameSet[n] = true
+	}
+	var projectSessions []session.Session
+	for _, s := range allSessions {
+		if nameSet[s.Name] {
+			projectSessions = append(projectSessions, s)
+		}
+	}
+
+	// Get agent info for all project sessions.
+	processInfo := engine.FetchProcessInfo(projectSessions)
+
+	// Push per-workspace status.
+	var totalLive, totalAll int
+	for _, ws := range workspaces {
+		var live int
+		var agentStates []string
+		for _, name := range ws.sessions {
+			totalAll++
+			info, ok := processInfo[name]
+			if !ok {
+				continue
+			}
+			live++
+			totalLive++
+			status := formatSessionStatus(name, info)
+			agentStates = append(agentStates, status)
+			_ = backend.SetStatus("tsm:"+name, status)
+		}
+
+		// Workspace-level summary.
+		wsSummary := fmt.Sprintf("%d/%d live", live, len(ws.sessions))
+		if len(agentStates) > 0 {
+			// Show the most interesting agent state.
+			wsSummary = agentStates[0]
+		}
+		_ = backend.SetStatus("tsm:ws:"+ws.name, wsSummary)
+	}
+
+	// Overall project summary.
+	_ = backend.SetStatus("tsm:project", fmt.Sprintf("%d/%d sessions live", totalLive, totalAll))
 
 	return nil
 }

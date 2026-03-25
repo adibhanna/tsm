@@ -66,6 +66,12 @@ type LayoutNode struct {
 	Children []LayoutNode // set when Type is a split
 }
 
+// ActiveWorkspaceProvider is an optional interface that backends can implement
+// to report the currently active workspace. Used by project next/prev.
+type ActiveWorkspaceProvider interface {
+	GetActiveWorkspace() (Workspace, error)
+}
+
 // Backend is the interface that terminal emulator mux backends must implement.
 // Each backend wraps a specific terminal emulator's split/tab/workspace API.
 type Backend interface {

@@ -28,12 +28,14 @@ type ManifestSurface struct {
 }
 
 // ManifestSplit describes a pane created by splitting a surface or another pane.
+// Splits can be nested to create complex layouts.
 type ManifestSplit struct {
-	Name      string `toml:"name"`
-	Session   string `toml:"session"`
-	Direction string `toml:"direction"` // left, right, up, down
-	Cwd       string `toml:"cwd,omitempty"`
-	Command   string `toml:"command,omitempty"`
+	Name      string          `toml:"name"`
+	Session   string          `toml:"session"`
+	Direction string          `toml:"direction"` // left, right, up, down
+	Cwd       string          `toml:"cwd,omitempty"`
+	Command   string          `toml:"command,omitempty"`
+	Split     []ManifestSplit `toml:"split,omitempty"`
 }
 
 // ManifestDir returns the directory where workspace manifests are stored.
@@ -184,20 +186,36 @@ func validateManifest(m *Manifest) error {
 		}
 		seen[s.Name] = true
 
-		for j, sp := range s.Split {
-			if sp.Name == "" {
-				return fmt.Errorf("surface[%d].split[%d]: name is required", i, j)
-			}
-			if sp.Session == "" {
-				return fmt.Errorf("surface[%d].split[%d] %q: session is required", i, j, sp.Name)
-			}
-			if _, ok := ParseDirection(sp.Direction); !ok {
-				return fmt.Errorf("surface[%d].split[%d] %q: invalid direction %q", i, j, sp.Name, sp.Direction)
-			}
-			if seen[sp.Name] {
-				return fmt.Errorf("duplicate pane name %q", sp.Name)
-			}
-			seen[sp.Name] = true
+		if err := validateSplits(s.Split, seen, fmt.Sprintf("surface[%d]", i), 0); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+const maxSplitDepth = 4
+
+func validateSplits(splits []ManifestSplit, seen map[string]bool, path string, depth int) error {
+	if depth > maxSplitDepth {
+		return fmt.Errorf("%s: split nesting exceeds maximum depth of %d", path, maxSplitDepth)
+	}
+	for j, sp := range splits {
+		p := fmt.Sprintf("%s.split[%d]", path, j)
+		if sp.Name == "" {
+			return fmt.Errorf("%s: name is required", p)
+		}
+		if sp.Session == "" {
+			return fmt.Errorf("%s %q: session is required", p, sp.Name)
+		}
+		if _, ok := ParseDirection(sp.Direction); !ok {
+			return fmt.Errorf("%s %q: invalid direction %q", p, sp.Name, sp.Direction)
+		}
+		if seen[sp.Name] {
+			return fmt.Errorf("duplicate pane name %q", sp.Name)
+		}
+		seen[sp.Name] = true
+		if err := validateSplits(sp.Split, seen, p, depth+1); err != nil {
+			return err
 		}
 	}
 	return nil

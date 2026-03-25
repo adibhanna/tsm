@@ -11,6 +11,30 @@ import (
 	"github.com/adibhanna/tsm/internal/session"
 )
 
+// collectSessions returns all session names from manifest surfaces and
+// their splits (recursively).
+func collectSessions(manifests []*mux.Manifest) []string {
+	var names []string
+	for _, m := range manifests {
+		for _, surf := range m.Surface {
+			names = append(names, surf.Session)
+			names = append(names, collectSplitSessions(surf.Split)...)
+		}
+	}
+	return names
+}
+
+func collectSplitSessions(splits []mux.ManifestSplit) []string {
+	var names []string
+	for _, sp := range splits {
+		names = append(names, sp.Session)
+		if len(sp.Split) > 0 {
+			names = append(names, collectSplitSessions(sp.Split)...)
+		}
+	}
+	return names
+}
+
 func cmdProject() {
 	if len(os.Args) < 3 {
 		printProjectUsage()
@@ -40,6 +64,12 @@ func cmdProject() {
 		cmdProjectAdd()
 	case "remove", "rm":
 		cmdProjectRemove()
+	case "next":
+		cmdProjectSwitch(+1)
+	case "prev":
+		cmdProjectSwitch(-1)
+	case "sidebar":
+		cmdProjectSidebar()
 	case "sync":
 		cmdProjectSync()
 	case "edit":
@@ -251,21 +281,13 @@ func cmdProjectClose() {
 		os.Exit(1)
 	}
 
-	// Collect all session names from manifests.
+	// Kill all sessions from manifests (including nested splits).
 	sessCfg := session.DefaultConfig()
 	var killed int
-	for _, m := range manifests {
-		for _, surf := range m.Surface {
-			if err := session.KillSession(sessCfg, surf.Session); err == nil {
-				fmt.Printf("  killed session %q\n", surf.Session)
-				killed++
-			}
-			for _, sp := range surf.Split {
-				if err := session.KillSession(sessCfg, sp.Session); err == nil {
-					fmt.Printf("  killed session %q\n", sp.Session)
-					killed++
-				}
-			}
+	for _, name := range collectSessions(manifests) {
+		if err := session.KillSession(sessCfg, name); err == nil {
+			fmt.Printf("  killed session %q\n", name)
+			killed++
 		}
 	}
 
@@ -370,13 +392,8 @@ func cmdProjectRemove() {
 	worktrees := []project.Worktree{{Path: removed.Path, Branch: removed.Branch}}
 	if manifests, err := project.Expand(cfg, worktrees); err == nil {
 		sessCfg := session.DefaultConfig()
-		for _, m := range manifests {
-			for _, surf := range m.Surface {
-				_ = session.KillSession(sessCfg, surf.Session)
-				for _, sp := range surf.Split {
-					_ = session.KillSession(sessCfg, sp.Session)
-				}
-			}
+		for _, name := range collectSessions(manifests) {
+			_ = session.KillSession(sessCfg, name)
 		}
 	}
 
@@ -397,6 +414,56 @@ func cmdProjectRemove() {
 	}
 
 	fmt.Printf("Removed worktree %q from project %q\n", branch, name)
+}
+
+func cmdProjectSidebar() {
+	if len(os.Args) < 5 || os.Args[3] != "sync" {
+		fmt.Fprintln(os.Stderr, "usage: tsm project sidebar sync <name>")
+		os.Exit(1)
+	}
+	name := os.Args[4]
+
+	cfg, err := project.Load(name)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	worktrees, err := resolveWorktrees(cfg, "")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	manifests, err := project.Expand(cfg, worktrees)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error expanding project: %v\n", err)
+		os.Exit(1)
+	}
+
+	orch, err := newOrchestrator()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := mux.SidebarSyncManifests(orch.Backend, session.DefaultConfig(), manifests); err != nil {
+		fmt.Fprintf(os.Stderr, "Error syncing sidebar: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Sidebar synced for project %q\n", name)
+}
+
+func cmdProjectSwitch(direction int) {
+	orch, err := newOrchestrator()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	if err := orch.ProjectSwitch(direction); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func cmdProjectList() {
@@ -513,6 +580,9 @@ Usage:
   tsm project close <name> [branch]       Close all (or one) worktree sessions
   tsm project add <name> <branch> [path]  Add a new worktree
   tsm project remove <name> <branch>      Remove a worktree and its sessions
+  tsm project next                        Switch to next worktree workspace
+  tsm project prev                        Switch to previous worktree workspace
+  tsm project sidebar sync <name>         Sync agent status to cmux sidebar
   tsm project list                        List configured projects
   tsm project sync <name>                 Re-scan worktrees from git
   tsm project edit [name]                 Open project config in $EDITOR

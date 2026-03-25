@@ -286,6 +286,37 @@ func (b *Backend) GetFocusedPane() (mux.Pane, error) {
 	}, nil
 }
 
+// GetActiveWorkspace returns the currently focused workspace.
+func (b *Backend) GetActiveWorkspace() (mux.Workspace, error) {
+	out, err := b.run("--json", "identify")
+	if err != nil {
+		return mux.Workspace{}, fmt.Errorf("identify: %w", err)
+	}
+	var resp struct {
+		Focused struct {
+			WorkspaceRef string `json:"workspace_ref"`
+		} `json:"focused"`
+	}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		return mux.Workspace{}, fmt.Errorf("parse identify: %w", err)
+	}
+	if resp.Focused.WorkspaceRef == "" {
+		return mux.Workspace{}, fmt.Errorf("no active workspace")
+	}
+
+	// Look up the workspace name from the ref.
+	workspaces, err := b.ListWorkspaces()
+	if err != nil {
+		return mux.Workspace{}, err
+	}
+	for _, w := range workspaces {
+		if w.ID == resp.Focused.WorkspaceRef {
+			return w, nil
+		}
+	}
+	return mux.Workspace{ID: resp.Focused.WorkspaceRef}, nil
+}
+
 // --- I/O ---
 
 func (b *Backend) SendText(paneID string, text string) error {

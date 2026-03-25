@@ -9,6 +9,13 @@ import (
 	"github.com/adibhanna/tsm/internal/session"
 )
 
+// attachJob maps a terminal surface to a session that should be attached into it.
+type attachJob struct {
+	surfaceRef  string
+	sessionName string
+	command     string // optional command to run after attach
+}
+
 // Orchestrator coordinates a mux backend with tsm sessions.
 type Orchestrator struct {
 	Backend Backend
@@ -51,11 +58,6 @@ func (o *Orchestrator) OpenManifest(manifest *Manifest) error {
 
 	// Phase 1: Create all sessions, surfaces, and splits.
 	// Collect surface→session mappings for attaching later.
-	type attachJob struct {
-		surfaceRef  string
-		sessionName string
-		command     string // optional command to run after attach
-	}
 	var jobs []attachJob
 
 	for i, surf := range manifest.Surface {
@@ -86,31 +88,8 @@ func (o *Orchestrator) OpenManifest(manifest *Manifest) error {
 		}
 		jobs = append(jobs, attachJob{surfaceRef: surfaceRef, sessionName: surf.Session, command: surf.Command})
 
-		for _, sp := range surf.Split {
-			dir, ok := ParseDirection(sp.Direction)
-			if !ok {
-				return fmt.Errorf("surface %q split %q: invalid direction %q", surf.Name, sp.Name, sp.Direction)
-			}
-			if err := o.ensureSession(sp.Session, sp.Cwd, ""); err != nil {
-				return fmt.Errorf("split %q: %w", sp.Name, err)
-			}
-
-			beforeSurfaces, _ := o.Backend.ListPaneSurfaces(wsID)
-			if _, err := o.Backend.SplitPane(wsID, dir); err != nil {
-				return fmt.Errorf("split %q: create: %w", sp.Name, err)
-			}
-			time.Sleep(150 * time.Millisecond)
-
-			afterSurfaces, err := o.Backend.ListPaneSurfaces(wsID)
-			if err != nil {
-				return fmt.Errorf("split %q: list surfaces: %w", sp.Name, err)
-			}
-			newSurf := findNewSurface(beforeSurfaces, afterSurfaces)
-			if newSurf == "" {
-				return fmt.Errorf("split %q: could not find new terminal surface", sp.Name)
-			}
-			surfaces = afterSurfaces
-			jobs = append(jobs, attachJob{surfaceRef: newSurf, sessionName: sp.Session, command: sp.Command})
+		if err := o.openSplits(wsID, surf.Split, &jobs, &surfaces); err != nil {
+			return fmt.Errorf("surface %q: %w", surf.Name, err)
 		}
 	}
 
@@ -144,6 +123,97 @@ func (o *Orchestrator) OpenManifest(manifest *Manifest) error {
 
 	_ = o.Backend.Log(fmt.Sprintf("workspace %q opened", manifest.Name))
 	return nil
+}
+
+// openSplits recursively creates panes for nested splits.
+// After creating each split pane, it recurses into that pane's children
+// before moving to the next sibling (depth-first). This works because cmux
+// splits the currently focused pane, and a new split receives focus.
+func (o *Orchestrator) openSplits(wsID string, splits []ManifestSplit, jobs *[]attachJob, surfaces *[]string) error {
+	for _, sp := range splits {
+		dir, ok := ParseDirection(sp.Direction)
+		if !ok {
+			return fmt.Errorf("split %q: invalid direction %q", sp.Name, sp.Direction)
+		}
+		if err := o.ensureSession(sp.Session, sp.Cwd, ""); err != nil {
+			return fmt.Errorf("split %q: %w", sp.Name, err)
+		}
+
+		beforeSurfaces, _ := o.Backend.ListPaneSurfaces(wsID)
+		if _, err := o.Backend.SplitPane(wsID, dir); err != nil {
+			return fmt.Errorf("split %q: create: %w", sp.Name, err)
+		}
+		time.Sleep(150 * time.Millisecond)
+
+		afterSurfaces, err := o.Backend.ListPaneSurfaces(wsID)
+		if err != nil {
+			return fmt.Errorf("split %q: list surfaces: %w", sp.Name, err)
+		}
+		newSurf := findNewSurface(beforeSurfaces, afterSurfaces)
+		if newSurf == "" {
+			return fmt.Errorf("split %q: could not find new terminal surface", sp.Name)
+		}
+		*surfaces = afterSurfaces
+		*jobs = append(*jobs, attachJob{surfaceRef: newSurf, sessionName: sp.Session, command: sp.Command})
+
+		// Recurse into nested splits (the new pane is focused).
+		if len(sp.Split) > 0 {
+			if err := o.openSplits(wsID, sp.Split, jobs, surfaces); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// ProjectSwitch switches to the next or previous workspace within the same project.
+// direction: +1 for next, -1 for prev (with wrap-around).
+func (o *Orchestrator) ProjectSwitch(direction int) error {
+	awp, ok := o.Backend.(ActiveWorkspaceProvider)
+	if !ok {
+		return fmt.Errorf("backend %q does not support workspace detection", o.Backend.Name())
+	}
+
+	current, err := awp.GetActiveWorkspace()
+	if err != nil {
+		return fmt.Errorf("get active workspace: %w", err)
+	}
+
+	// Find the project prefix from the current workspace name.
+	prefix := ""
+	if i := strings.Index(current.Name, ":"); i > 0 {
+		prefix = current.Name[:i+1] // e.g. "app:"
+	}
+	if prefix == "" {
+		return fmt.Errorf("workspace %q does not belong to a project", current.Name)
+	}
+
+	// List all workspaces and filter to the same project.
+	all, err := o.Backend.ListWorkspaces()
+	if err != nil {
+		return fmt.Errorf("list workspaces: %w", err)
+	}
+
+	var projectWS []Workspace
+	currentIdx := -1
+	for _, w := range all {
+		if strings.HasPrefix(w.Name, prefix) {
+			if w.ID == current.ID {
+				currentIdx = len(projectWS)
+			}
+			projectWS = append(projectWS, w)
+		}
+	}
+
+	if len(projectWS) <= 1 {
+		return nil // nothing to switch to
+	}
+	if currentIdx < 0 {
+		return fmt.Errorf("current workspace not found in project list")
+	}
+
+	targetIdx := (currentIdx + direction + len(projectWS)) % len(projectWS)
+	return o.Backend.SelectWorkspace(projectWS[targetIdx].ID)
 }
 
 // Split creates a new split in the focused pane and attaches a tsm session.

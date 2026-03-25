@@ -80,16 +80,7 @@ func expandWorktree(cfg *Config, wt Worktree) (*mux.Manifest, error) {
 			Command: replacer.Replace(ts.Command),
 		}
 
-		for _, tsp := range ts.Split {
-			splitSession := wsName + ":" + tsp.Name
-			surf.Split = append(surf.Split, mux.ManifestSplit{
-				Name:      tsp.Name,
-				Session:   splitSession,
-				Direction: tsp.Direction,
-				Cwd:       wt.Path,
-				Command:   replacer.Replace(tsp.Command),
-			})
-		}
+		surf.Split = expandSplits(wsName, wt.Path, ts.Split, replacer)
 
 		surfaces = append(surfaces, surf)
 	}
@@ -100,4 +91,22 @@ func expandWorktree(cfg *Config, wt Worktree) (*mux.Manifest, error) {
 		Startup: surfaces[0].Session,
 		Surface: surfaces,
 	}, nil
+}
+
+func expandSplits(wsName, cwd string, splits []TemplateSplit, replacer *strings.Replacer) []mux.ManifestSplit {
+	var result []mux.ManifestSplit
+	for _, tsp := range splits {
+		ms := mux.ManifestSplit{
+			Name:      tsp.Name,
+			Session:   wsName + ":" + tsp.Name,
+			Direction: tsp.Direction,
+			Cwd:       cwd,
+			Command:   replacer.Replace(tsp.Command),
+		}
+		if len(tsp.Split) > 0 {
+			ms.Split = expandSplits(wsName, cwd, tsp.Split, replacer)
+		}
+		result = append(result, ms)
+	}
+	return result
 }

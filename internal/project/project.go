@@ -34,11 +34,13 @@ type TemplateSurface struct {
 	Split   []TemplateSplit `toml:"split,omitempty"`
 }
 
-// TemplateSplit is a pane template within a tab.
+// TemplateSplit is a pane template within a tab. Splits can be nested
+// to create complex layouts (e.g. agent left | editor top-right + git bottom-right).
 type TemplateSplit struct {
-	Name      string `toml:"name"`
-	Direction string `toml:"direction"`
-	Command   string `toml:"command,omitempty"`
+	Name      string          `toml:"name"`
+	Direction string          `toml:"direction"`
+	Command   string          `toml:"command,omitempty"`
+	Split     []TemplateSplit `toml:"split,omitempty"`
 }
 
 // WorktreeEntry is an explicit worktree override in the config.
@@ -159,6 +161,16 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// ProjectNameFromWorkspace extracts the project name from a workspace name.
+// For the default format "{project}:{branch}", this is the prefix before the first ":".
+// Returns the project name, or empty string if not detected.
+func ProjectNameFromWorkspace(wsName string) string {
+	if i := strings.Index(wsName, ":"); i > 0 {
+		return wsName[:i]
+	}
+	return ""
 }
 
 // SanitizeBranch converts a branch name to a safe session/workspace name component.
