@@ -131,19 +131,23 @@ func TestSanitizeBranch(t *testing.T) {
 
 func TestSanitizeRepoName(t *testing.T) {
 	tests := []struct {
-		input string
-		want  string
+		input  string
+		want   string
+		wantOK bool
 	}{
-		{"/Users/dev/monolith", "monolith"},
-		{"/Users/dev/monolith.git", "monolith"},
-		{"/Users/dev/monolith.bare", "monolith"},
-		{"/Users/dev/my-repo.git", "my-repo"},
-		{".git", "project"},
+		{"/Users/dev/monolith", "monolith", true},
+		{"/Users/dev/monolith.git", "monolith", true},
+		{"/Users/dev/monolith.bare", "monolith", true},
+		{"/Users/dev/my-repo.git", "my-repo", true},
+		{".git", "project", false},
 	}
 	for _, tt := range tests {
-		got := sanitizeRepoName(tt.input)
+		got, ok := sanitizeRepoName(tt.input)
 		if got != tt.want {
 			t.Errorf("sanitizeRepoName(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+		if ok != tt.wantOK {
+			t.Errorf("sanitizeRepoName(%q) ok = %v, want %v", tt.input, ok, tt.wantOK)
 		}
 	}
 }

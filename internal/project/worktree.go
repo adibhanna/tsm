@@ -104,8 +104,7 @@ func RepoName(path string) (string, error) {
 		// --git-common-dir returns the .git dir (or the bare repo dir).
 		// For bare repos like "/path/repo.bare", use it directly.
 		// For regular repos, it returns "/path/repo/.git" — take the parent.
-		name := sanitizeRepoName(strings.TrimSuffix(commonDir, "/.git"))
-		if name != "project" {
+		if name, ok := sanitizeRepoName(strings.TrimSuffix(commonDir, "/.git")); ok {
 			return name, nil
 		}
 	}
@@ -117,10 +116,14 @@ func RepoName(path string) (string, error) {
 		return "", fmt.Errorf("git rev-parse in %q: %w", expanded, err)
 	}
 	top := strings.TrimSpace(string(out))
-	return sanitizeRepoName(top), nil
+	name, _ := sanitizeRepoName(top)
+	return name, nil
 }
 
-func sanitizeRepoName(toplevel string) string {
+// sanitizeRepoName extracts a clean project name from a repo path.
+// Returns (name, true) on success, or ("project", false) if the path
+// yields no meaningful name.
+func sanitizeRepoName(toplevel string) (string, bool) {
 	base := toplevel
 	// Take last path component.
 	if i := strings.LastIndex(base, "/"); i >= 0 {
@@ -130,9 +133,9 @@ func sanitizeRepoName(toplevel string) string {
 	base = strings.TrimSuffix(base, ".git")
 	base = strings.TrimSuffix(base, ".bare")
 	if base == "" {
-		base = "project"
+		return "project", false
 	}
-	return base
+	return base, true
 }
 
 func expandPath(p string) string {

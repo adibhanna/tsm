@@ -1640,6 +1640,41 @@ func cmdProjectInit() {
 	fmt.Printf("\nEdit the config to customize, then run: tsm project open %s\n", name)
 }
 
+// resolveWorktrees loads worktrees from config entries or auto-detects them,
+// then optionally filters to a single branch.
+func resolveWorktrees(cfg *project.Config, branchFilter string) ([]project.Worktree, error) {
+	var worktrees []project.Worktree
+	if len(cfg.Trees) > 0 {
+		for _, e := range cfg.Trees {
+			worktrees = append(worktrees, project.Worktree{
+				Path:   e.Path,
+				Branch: e.Branch,
+			})
+		}
+	} else {
+		var err error
+		worktrees, err = project.DetectWorktrees(cfg.Root)
+		if err != nil {
+			return nil, fmt.Errorf("detecting worktrees: %w", err)
+		}
+	}
+
+	if branchFilter != "" {
+		sanitized := project.SanitizeBranch(branchFilter)
+		var filtered []project.Worktree
+		for _, wt := range worktrees {
+			if wt.Branch == branchFilter || project.SanitizeBranch(wt.Branch) == sanitized {
+				filtered = append(filtered, wt)
+			}
+		}
+		if len(filtered) == 0 {
+			return nil, fmt.Errorf("no worktree matching branch %q", branchFilter)
+		}
+		worktrees = filtered
+	}
+	return worktrees, nil
+}
+
 func cmdProjectOpen() {
 	if len(os.Args) < 4 {
 		fmt.Fprintln(os.Stderr, "usage: tsm project open <name> [branch]")
@@ -1657,37 +1692,10 @@ func cmdProjectOpen() {
 		os.Exit(1)
 	}
 
-	// Resolve worktrees: use explicit entries if present, otherwise auto-detect.
-	var worktrees []project.Worktree
-	if len(cfg.Trees) > 0 {
-		for _, e := range cfg.Trees {
-			worktrees = append(worktrees, project.Worktree{
-				Path:   e.Path,
-				Branch: e.Branch,
-			})
-		}
-	} else {
-		worktrees, err = project.DetectWorktrees(cfg.Root)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error detecting worktrees: %v\n", err)
-			os.Exit(1)
-		}
-	}
-
-	// Filter to a single branch if specified.
-	if branchFilter != "" {
-		var filtered []project.Worktree
-		sanitized := project.SanitizeBranch(branchFilter)
-		for _, wt := range worktrees {
-			if wt.Branch == branchFilter || project.SanitizeBranch(wt.Branch) == sanitized {
-				filtered = append(filtered, wt)
-			}
-		}
-		if len(filtered) == 0 {
-			fmt.Fprintf(os.Stderr, "No worktree matching branch %q\n", branchFilter)
-			os.Exit(1)
-		}
-		worktrees = filtered
+	worktrees, err := resolveWorktrees(cfg, branchFilter)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Expand template into manifests.
@@ -1731,37 +1739,10 @@ func cmdProjectClose() {
 		os.Exit(1)
 	}
 
-	// Resolve worktrees.
-	var worktrees []project.Worktree
-	if len(cfg.Trees) > 0 {
-		for _, e := range cfg.Trees {
-			worktrees = append(worktrees, project.Worktree{
-				Path:   e.Path,
-				Branch: e.Branch,
-			})
-		}
-	} else {
-		worktrees, err = project.DetectWorktrees(cfg.Root)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error detecting worktrees: %v\n", err)
-			os.Exit(1)
-		}
-	}
-
-	// Filter to a single branch if specified.
-	if branchFilter != "" {
-		var filtered []project.Worktree
-		sanitized := project.SanitizeBranch(branchFilter)
-		for _, wt := range worktrees {
-			if wt.Branch == branchFilter || project.SanitizeBranch(wt.Branch) == sanitized {
-				filtered = append(filtered, wt)
-			}
-		}
-		if len(filtered) == 0 {
-			fmt.Fprintf(os.Stderr, "No worktree matching branch %q\n", branchFilter)
-			os.Exit(1)
-		}
-		worktrees = filtered
+	worktrees, err := resolveWorktrees(cfg, branchFilter)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Expand to get session names.
@@ -1936,14 +1917,10 @@ func cmdProjectList() {
 			fmt.Printf("  %s (error: %v)\n", n, err)
 			continue
 		}
-		treeCount := len(cfg.Trees)
-		if treeCount == 0 {
-			treeCount = -1 // auto-detect
-		}
-		if treeCount < 0 {
+		if len(cfg.Trees) == 0 {
 			fmt.Printf("  %s  root=%s  agent=%s  worktrees=auto\n", n, cfg.Root, cfg.Agent)
 		} else {
-			fmt.Printf("  %s  root=%s  agent=%s  worktrees=%d\n", n, cfg.Root, cfg.Agent, treeCount)
+			fmt.Printf("  %s  root=%s  agent=%s  worktrees=%d\n", n, cfg.Root, cfg.Agent, len(cfg.Trees))
 		}
 	}
 }
@@ -2003,7 +1980,12 @@ func cmdProjectEdit() {
 
 	target := dir
 	if len(os.Args) >= 4 {
-		target = filepath.Join(dir, os.Args[3]+".toml")
+		name := os.Args[3]
+		if err := mux.ValidateWorkspaceName(name); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: invalid project name: %v\n", err)
+			os.Exit(1)
+		}
+		target = filepath.Join(dir, name+".toml")
 	}
 
 	editor := os.Getenv("EDITOR")
