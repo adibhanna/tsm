@@ -11,54 +11,14 @@ func TestFormatWorkspaceName(t *testing.T) {
 		dirname string
 		want    string
 	}{
-		{
-			name:    "default format",
-			format:  "{project}:{branch}",
-			project: "app", branch: "main", dirname: "app-main",
-			want: "app:main",
-		},
-		{
-			name:    "dirname:project:branch",
-			format:  "{dirname}:{project}:{branch}",
-			project: "app", branch: "feat-auth", dirname: "app-feat",
-			want: "app-feat:app:feat-auth",
-		},
-		{
-			name:    "dirname only",
-			format:  "{dirname}",
-			project: "app", branch: "main", dirname: "app-main",
-			want: "app-main",
-		},
-		{
-			name:    "dirname:branch",
-			format:  "{dirname}:{branch}",
-			project: "app", branch: "main", dirname: "app-main",
-			want: "app-main:main",
-		},
-		{
-			name:    "project only",
-			format:  "{project}",
-			project: "monolith", branch: "main", dirname: "monolith",
-			want: "monolith",
-		},
-		{
-			name:    "literal text preserved",
-			format:  "ws-{project}-{branch}",
-			project: "app", branch: "main", dirname: "app-main",
-			want: "ws-app-main",
-		},
-		{
-			name:    "no placeholders",
-			format:  "static-name",
-			project: "app", branch: "main", dirname: "app-main",
-			want: "static-name",
-		},
-		{
-			name:    "repeated placeholders",
-			format:  "{project}:{project}:{branch}",
-			project: "app", branch: "main", dirname: "app-main",
-			want: "app:app:main",
-		},
+		{"default format", "{project}:{branch}", "app", "main", "app-main", "app:main"},
+		{"dirname:project:branch", "{dirname}:{project}:{branch}", "app", "feat-auth", "app-feat", "app-feat:app:feat-auth"},
+		{"dirname only", "{dirname}", "app", "main", "app-main", "app-main"},
+		{"dirname:branch", "{dirname}:{branch}", "app", "main", "app-main", "app-main:main"},
+		{"project only", "{project}", "monolith", "main", "monolith", "monolith"},
+		{"literal text preserved", "ws-{project}-{branch}", "app", "main", "app-main", "ws-app-main"},
+		{"no placeholders", "static-name", "app", "main", "app-main", "static-name"},
+		{"repeated placeholders", "{project}:{project}:{branch}", "app", "main", "app-main", "app:app:main"},
 	}
 
 	for _, tt := range tests {
@@ -76,7 +36,6 @@ func TestExpandUsesDefaultFormat(t *testing.T) {
 		Name:  "app",
 		Root:  "/dev/app",
 		Agent: "claude",
-		// WorkspaceFormat intentionally empty — should use default.
 		Tmpl: Template{
 			Surface: []TemplateSurface{
 				{Name: "dev", Command: "$AGENT"},
@@ -87,17 +46,16 @@ func TestExpandUsesDefaultFormat(t *testing.T) {
 		{Path: "/dev/app-main", Branch: "main"},
 	}
 
-	manifests, err := Expand(cfg, worktrees)
+	m, err := Expand(cfg, worktrees)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Default is {project}:{branch}
-	if manifests[0].Name != "app:main" {
-		t.Errorf("Name = %q, want %q", manifests[0].Name, "app:main")
+	if m.Surface[0].Name != "app:main" {
+		t.Errorf("tab name = %q, want %q", m.Surface[0].Name, "app:main")
 	}
 }
 
-func TestExpandSessionNamesMatchWorkspaceName(t *testing.T) {
+func TestExpandSessionNamesMatchTabName(t *testing.T) {
 	cfg := &Config{
 		Name:            "mono",
 		Root:            "/dev/mono",
@@ -119,23 +77,20 @@ func TestExpandSessionNamesMatchWorkspaceName(t *testing.T) {
 		{Path: "/dev/mono-feat", Branch: "feat/auth"},
 	}
 
-	manifests, err := Expand(cfg, worktrees)
+	m, err := Expand(cfg, worktrees)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	m := manifests[0]
 
-	// Workspace name uses custom format.
-	if m.Name != "mono-feat:feat-auth" {
-		t.Errorf("Name = %q, want %q", m.Name, "mono-feat:feat-auth")
+	surf := m.Surface[0]
+	if surf.Name != "mono-feat:feat-auth" {
+		t.Errorf("tab name = %q, want %q", surf.Name, "mono-feat:feat-auth")
 	}
-	// Session names derive from workspace name.
-	if m.Surface[0].Session != "mono-feat:feat-auth" {
-		t.Errorf("Session = %q, want %q", m.Surface[0].Session, "mono-feat:feat-auth")
+	if surf.Session != "mono-feat:feat-auth" {
+		t.Errorf("session = %q, want %q", surf.Session, "mono-feat:feat-auth")
 	}
-	// Split session appends pane name.
-	if m.Surface[0].Split[0].Session != "mono-feat:feat-auth:git" {
-		t.Errorf("Split.Session = %q, want %q", m.Surface[0].Split[0].Session, "mono-feat:feat-auth:git")
+	if surf.Split[0].Session != "mono-feat:feat-auth:git" {
+		t.Errorf("split session = %q, want %q", surf.Split[0].Session, "mono-feat:feat-auth:git")
 	}
 }
 
@@ -161,32 +116,28 @@ func TestExpandAllWorktreesCwd(t *testing.T) {
 		{Path: "/dev/app-staging", Branch: "staging"},
 	}
 
-	manifests, err := Expand(cfg, worktrees)
+	m, err := Expand(cfg, worktrees)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(manifests) != 2 {
-		t.Fatalf("expected 2 manifests, got %d", len(manifests))
+	if len(m.Surface) != 2 {
+		t.Fatalf("expected 2 surfaces, got %d", len(m.Surface))
 	}
 
-	// Each manifest's surfaces and splits should have the worktree CWD.
-	for i, m := range manifests {
-		wantCwd := worktrees[i].Path
-		for _, surf := range m.Surface {
-			if surf.Cwd != wantCwd {
-				t.Errorf("manifest[%d] surface cwd = %q, want %q", i, surf.Cwd, wantCwd)
-			}
-			for _, sp := range surf.Split {
-				if sp.Cwd != wantCwd {
-					t.Errorf("manifest[%d] split cwd = %q, want %q", i, sp.Cwd, wantCwd)
-				}
+	expected := []string{"/dev/app-main", "/dev/app-staging"}
+	for i, surf := range m.Surface {
+		if surf.Cwd != expected[i] {
+			t.Errorf("surface[%d] cwd = %q, want %q", i, surf.Cwd, expected[i])
+		}
+		for _, sp := range surf.Split {
+			if sp.Cwd != expected[i] {
+				t.Errorf("surface[%d] split cwd = %q, want %q", i, sp.Cwd, expected[i])
 			}
 		}
 	}
 
-	// Agent variable should be expanded.
-	if manifests[0].Surface[0].Command != "codex" {
-		t.Errorf("Command = %q, want %q", manifests[0].Surface[0].Command, "codex")
+	if m.Surface[0].Command != "codex" {
+		t.Errorf("Command = %q, want %q", m.Surface[0].Command, "codex")
 	}
 }
 

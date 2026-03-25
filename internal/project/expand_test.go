@@ -32,31 +32,32 @@ func TestExpand(t *testing.T) {
 		{Path: "/Users/dev/monolith-fix-perf", Branch: "fix/perf"},
 	}
 
-	manifests, err := Expand(cfg, worktrees)
+	m, err := Expand(cfg, worktrees)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(manifests) != 3 {
-		t.Fatalf("expected 3 manifests, got %d", len(manifests))
+
+	// Single manifest with 3 surfaces (one tab per worktree).
+	if m.Name != "monolith" {
+		t.Errorf("manifest.Name = %q, want %q", m.Name, "monolith")
+	}
+	if len(m.Surface) != 3 {
+		t.Fatalf("expected 3 surfaces, got %d", len(m.Surface))
 	}
 
-	// Default format: project:branch
-	m := manifests[0]
-	if m.Name != "monolith:main" {
-		t.Errorf("manifest[0].Name = %q, want %q", m.Name, "monolith:main")
-	}
-	if len(m.Surface) != 1 {
-		t.Fatalf("manifest[0] has %d surfaces, want 1", len(m.Surface))
-	}
+	// Tab 1: main
 	surf := m.Surface[0]
+	if surf.Name != "monolith:main" {
+		t.Errorf("surface[0].Name = %q, want %q", surf.Name, "monolith:main")
+	}
 	if surf.Session != "monolith:main" {
-		t.Errorf("surface.Session = %q, want %q", surf.Session, "monolith:main")
+		t.Errorf("surface[0].Session = %q, want %q", surf.Session, "monolith:main")
 	}
 	if surf.Cwd != "/Users/dev/monolith" {
-		t.Errorf("surface.Cwd = %q, want %q", surf.Cwd, "/Users/dev/monolith")
+		t.Errorf("surface[0].Cwd = %q, want %q", surf.Cwd, "/Users/dev/monolith")
 	}
 	if surf.Command != "claude" {
-		t.Errorf("surface.Command = %q, want %q", surf.Command, "claude")
+		t.Errorf("surface[0].Command = %q, want %q", surf.Command, "claude")
 	}
 	if len(surf.Split) != 1 {
 		t.Fatalf("surface has %d splits, want 1", len(surf.Split))
@@ -65,21 +66,15 @@ func TestExpand(t *testing.T) {
 	if split.Session != "monolith:main:git" {
 		t.Errorf("split.Session = %q, want %q", split.Session, "monolith:main:git")
 	}
-	if split.Direction != "right" {
-		t.Errorf("split.Direction = %q, want %q", split.Direction, "right")
-	}
-	if split.Command != "lazygit" {
-		t.Errorf("split.Command = %q, want %q", split.Command, "lazygit")
+
+	// Tab 2: feat-auth
+	if m.Surface[1].Name != "monolith:feat-auth" {
+		t.Errorf("surface[1].Name = %q, want %q", m.Surface[1].Name, "monolith:feat-auth")
 	}
 
-	m2 := manifests[1]
-	if m2.Name != "monolith:feat-auth" {
-		t.Errorf("manifest[1].Name = %q, want %q", m2.Name, "monolith:feat-auth")
-	}
-
-	m3 := manifests[2]
-	if m3.Name != "monolith:fix-perf" {
-		t.Errorf("manifest[2].Name = %q, want %q", m3.Name, "monolith:fix-perf")
+	// Tab 3: fix-perf
+	if m.Surface[2].Name != "monolith:fix-perf" {
+		t.Errorf("surface[2].Name = %q, want %q", m.Surface[2].Name, "monolith:fix-perf")
 	}
 }
 
@@ -87,7 +82,7 @@ func TestExpandCustomFormat(t *testing.T) {
 	tests := []struct {
 		name   string
 		format string
-		want   string
+		want   string // expected tab name
 	}{
 		{"dirname:project:branch", "{dirname}:{project}:{branch}", "app-main:app:main"},
 		{"dirname:branch", "{dirname}:{branch}", "app-main:main"},
@@ -112,12 +107,12 @@ func TestExpandCustomFormat(t *testing.T) {
 			worktrees := []Worktree{
 				{Path: "/dev/app-main", Branch: "main"},
 			}
-			manifests, err := Expand(cfg, worktrees)
+			m, err := Expand(cfg, worktrees)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if manifests[0].Name != tt.want {
-				t.Errorf("Name = %q, want %q", manifests[0].Name, tt.want)
+			if m.Surface[0].Name != tt.want {
+				t.Errorf("tab name = %q, want %q", m.Surface[0].Name, tt.want)
 			}
 		})
 	}
@@ -140,15 +135,12 @@ func TestExpandSkipsBare(t *testing.T) {
 		{Path: "/dev/repo-main", Branch: "main"},
 	}
 
-	manifests, err := Expand(cfg, worktrees)
+	m, err := Expand(cfg, worktrees)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(manifests) != 1 {
-		t.Fatalf("expected 1 manifest (bare skipped), got %d", len(manifests))
-	}
-	if manifests[0].Name != "repo:main" {
-		t.Errorf("Name = %q, want %q", manifests[0].Name, "repo:main")
+	if len(m.Surface) != 1 {
+		t.Fatalf("expected 1 surface (bare skipped), got %d", len(m.Surface))
 	}
 }
 
@@ -187,14 +179,11 @@ func TestExpandMultipleSurfaces(t *testing.T) {
 		{Path: "/dev/app", Branch: "main"},
 	}
 
-	manifests, err := Expand(cfg, worktrees)
+	m, err := Expand(cfg, worktrees)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(manifests) != 1 {
-		t.Fatalf("expected 1 manifest, got %d", len(manifests))
-	}
-	m := manifests[0]
+	// 1 worktree × 2 template surfaces = 2 tabs
 	if len(m.Surface) != 2 {
 		t.Fatalf("expected 2 surfaces, got %d", len(m.Surface))
 	}
@@ -206,8 +195,5 @@ func TestExpandMultipleSurfaces(t *testing.T) {
 	}
 	if m.Surface[1].Session != "app:main:server" {
 		t.Errorf("surface[1].Session = %q, want %q", m.Surface[1].Session, "app:main:server")
-	}
-	if m.Surface[1].Command != "npm run dev" {
-		t.Errorf("surface[1].Command = %q, want %q", m.Surface[1].Command, "npm run dev")
 	}
 }

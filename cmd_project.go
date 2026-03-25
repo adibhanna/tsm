@@ -11,15 +11,13 @@ import (
 	"github.com/adibhanna/tsm/internal/session"
 )
 
-// collectSessions returns all session names from manifest surfaces and
-// their splits (recursively).
-func collectSessions(manifests []*mux.Manifest) []string {
+// collectManifestSessions returns all session names from a manifest's surfaces
+// and their splits (recursively).
+func collectManifestSessions(m *mux.Manifest) []string {
 	var names []string
-	for _, m := range manifests {
-		for _, surf := range m.Surface {
-			names = append(names, surf.Session)
-			names = append(names, collectSplitSessions(surf.Split)...)
-		}
+	for _, surf := range m.Surface {
+		names = append(names, surf.Session)
+		names = append(names, collectSplitSessions(surf.Split)...)
 	}
 	return names
 }
@@ -42,15 +40,6 @@ func cmdProject() {
 	}
 	sub := os.Args[2]
 
-	// Project commands require cmux.
-	if sub != "help" && sub != "-h" && sub != "--help" {
-		term := mux.DetectTerminal()
-		if term.Backend != "cmux" {
-			fmt.Fprintf(os.Stderr, "Error: tsm project requires cmux (detected: %s)\n", term.Name)
-			os.Exit(1)
-		}
-	}
-
 	switch sub {
 	case "init":
 		cmdProjectInit()
@@ -65,9 +54,9 @@ func cmdProject() {
 	case "remove", "rm":
 		cmdProjectRemove()
 	case "next":
-		cmdProjectSwitch(+1)
+		cmdProjectNav(+1)
 	case "prev":
-		cmdProjectSwitch(-1)
+		cmdProjectNav(-1)
 	case "sidebar":
 		cmdProjectSidebar()
 	case "sync":
@@ -204,6 +193,24 @@ func resolveWorktrees(cfg *project.Config, branchFilter string) ([]project.Workt
 	return worktrees, nil
 }
 
+// expandProject loads a project config, resolves worktrees, and expands
+// the template into a single manifest.
+func expandProject(name, branchFilter string) (*project.Config, *mux.Manifest, error) {
+	cfg, err := project.Load(name)
+	if err != nil {
+		return nil, nil, err
+	}
+	worktrees, err := resolveWorktrees(cfg, branchFilter)
+	if err != nil {
+		return nil, nil, err
+	}
+	manifest, err := project.Expand(cfg, worktrees)
+	if err != nil {
+		return nil, nil, fmt.Errorf("expanding project: %w", err)
+	}
+	return cfg, manifest, nil
+}
+
 func cmdProjectOpen() {
 	if len(os.Args) < 4 {
 		fmt.Fprintln(os.Stderr, "usage: tsm project open <name> [branch]")
@@ -215,22 +222,9 @@ func cmdProjectOpen() {
 		branchFilter = os.Args[4]
 	}
 
-	cfg, err := project.Load(name)
+	_, manifest, err := expandProject(name, branchFilter)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	worktrees, err := resolveWorktrees(cfg, branchFilter)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Expand template into manifests.
-	manifests, err := project.Expand(cfg, worktrees)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error expanding project: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -240,15 +234,12 @@ func cmdProjectOpen() {
 		os.Exit(1)
 	}
 
-	// Open each worktree as its own workspace.
-	for _, m := range manifests {
-		fmt.Printf("Opening workspace %q ...\n", m.Name)
-		if err := orch.OpenManifest(m); err != nil {
-			fmt.Fprintf(os.Stderr, "Error opening workspace %q: %v\n", m.Name, err)
-			os.Exit(1)
-		}
+	fmt.Printf("Opening project %q (%d tabs) ...\n", name, len(manifest.Surface))
+	if err := orch.OpenManifest(manifest); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
-	fmt.Printf("Project %q opened (%d workspaces)\n", name, len(manifests))
+	fmt.Printf("Project %q opened\n", name)
 }
 
 func cmdProjectClose() {
@@ -262,31 +253,17 @@ func cmdProjectClose() {
 		branchFilter = os.Args[4]
 	}
 
-	cfg, err := project.Load(name)
+	_, manifest, err := expandProject(name, branchFilter)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	worktrees, err := resolveWorktrees(cfg, branchFilter)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Expand to get session names.
-	manifests, err := project.Expand(cfg, worktrees)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error expanding project: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Kill all sessions from manifests (including nested splits).
 	sessCfg := session.DefaultConfig()
 	var killed int
-	for _, name := range collectSessions(manifests) {
-		if err := session.KillSession(sessCfg, name); err == nil {
-			fmt.Printf("  killed session %q\n", name)
+	for _, s := range collectManifestSessions(manifest) {
+		if err := session.KillSession(sessCfg, s); err == nil {
+			fmt.Printf("  killed session %q\n", s)
 			killed++
 		}
 	}
@@ -315,10 +292,8 @@ func cmdProjectAdd() {
 	// Determine worktree path.
 	var wtPath string
 	if len(os.Args) >= 6 {
-		// Explicit path provided.
 		wtPath = os.Args[5]
 	} else {
-		// Auto: create worktree as sibling of root dir.
 		rootDir := filepath.Dir(cfg.Root)
 		safeBranch := project.SanitizeBranch(branch)
 		wtPath = filepath.Join(rootDir, cfg.Name+"-"+safeBranch)
@@ -344,7 +319,6 @@ func cmdProjectAdd() {
 		}
 	}
 
-	// Add to project config.
 	cfg.Trees = append(cfg.Trees, project.WorktreeEntry{
 		Path:   absPath,
 		Branch: branch,
@@ -373,7 +347,6 @@ func cmdProjectRemove() {
 		os.Exit(1)
 	}
 
-	// Find and remove the worktree entry.
 	var removed *project.WorktreeEntry
 	var remaining []project.WorktreeEntry
 	for _, e := range cfg.Trees {
@@ -388,12 +361,12 @@ func cmdProjectRemove() {
 		os.Exit(1)
 	}
 
-	// Kill sessions for this worktree first.
+	// Kill sessions for this worktree.
 	worktrees := []project.Worktree{{Path: removed.Path, Branch: removed.Branch}}
-	if manifests, err := project.Expand(cfg, worktrees); err == nil {
+	if manifest, err := project.Expand(cfg, worktrees); err == nil {
 		sessCfg := session.DefaultConfig()
-		for _, name := range collectSessions(manifests) {
-			_ = session.KillSession(sessCfg, name)
+		for _, s := range collectManifestSessions(manifest) {
+			_ = session.KillSession(sessCfg, s)
 		}
 	}
 
@@ -406,7 +379,6 @@ func cmdProjectRemove() {
 		fmt.Fprintln(os.Stderr, "The worktree entry will still be removed from the project config.")
 	}
 
-	// Update project config.
 	cfg.Trees = remaining
 	if err := project.Save(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error saving project: %v\n", err)
@@ -416,6 +388,25 @@ func cmdProjectRemove() {
 	fmt.Printf("Removed worktree %q from project %q\n", branch, name)
 }
 
+func cmdProjectNav(direction int) {
+	orch, err := newOrchestrator()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	if direction > 0 {
+		if err := orch.Backend.FocusNextPane(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		if err := orch.Backend.FocusPreviousPane(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+}
+
 func cmdProjectSidebar() {
 	if len(os.Args) < 5 || os.Args[3] != "sync" {
 		fmt.Fprintln(os.Stderr, "usage: tsm project sidebar sync <name>")
@@ -423,21 +414,9 @@ func cmdProjectSidebar() {
 	}
 	name := os.Args[4]
 
-	cfg, err := project.Load(name)
+	_, manifest, err := expandProject(name, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	worktrees, err := resolveWorktrees(cfg, "")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	manifests, err := project.Expand(cfg, worktrees)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error expanding project: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -447,23 +426,11 @@ func cmdProjectSidebar() {
 		os.Exit(1)
 	}
 
-	if err := mux.SidebarSyncManifests(orch.Backend, session.DefaultConfig(), manifests); err != nil {
+	if err := mux.SidebarSyncManifests(orch.Backend, session.DefaultConfig(), []*mux.Manifest{manifest}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error syncing sidebar: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Printf("Sidebar synced for project %q\n", name)
-}
-
-func cmdProjectSwitch(direction int) {
-	orch, err := newOrchestrator()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	if err := orch.ProjectSwitch(direction); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
 }
 
 func cmdProjectList() {
@@ -569,20 +536,20 @@ func cmdProjectEdit() {
 }
 
 func printProjectUsage() {
-	fmt.Print(`tsm project — worktree-aware project workspaces (cmux only)
+	fmt.Print(`tsm project — worktree-aware project workspaces
 
-Manage git worktree workflows as cmux workspaces. Each worktree gets its
-own workspace with a configurable layout (e.g. agent + git split).
+Manage git worktree workflows with tabs and splits. Each worktree gets
+its own tab with a configurable layout (e.g. agent + git split).
 
 Usage:
   tsm project init [path]                 Detect repo + worktrees, create config
-  tsm project open <name> [branch]        Open all (or one) worktree workspaces
+  tsm project open <name> [branch]        Open project (one tab per worktree)
   tsm project close <name> [branch]       Close all (or one) worktree sessions
   tsm project add <name> <branch> [path]  Add a new worktree
   tsm project remove <name> <branch>      Remove a worktree and its sessions
-  tsm project next                        Switch to next worktree workspace
-  tsm project prev                        Switch to previous worktree workspace
-  tsm project sidebar sync <name>         Sync agent status to cmux sidebar
+  tsm project next                        Focus next tab
+  tsm project prev                        Focus previous tab
+  tsm project sidebar sync <name>         Sync agent status to sidebar
   tsm project list                        List configured projects
   tsm project sync <name>                 Re-scan worktrees from git
   tsm project edit [name]                 Open project config in $EDITOR

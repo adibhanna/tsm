@@ -8,9 +8,9 @@ import (
 	"github.com/adibhanna/tsm/internal/mux"
 )
 
-// Expand generates one mux.Manifest per worktree by stamping the project template.
-// Each manifest becomes a cmux workspace.
-func Expand(cfg *Config, worktrees []Worktree) ([]*mux.Manifest, error) {
+// Expand generates a single mux.Manifest with one surface (tab) per worktree.
+// Each tab contains the template layout (splits) applied to that worktree's CWD.
+func Expand(cfg *Config, worktrees []Worktree) (*mux.Manifest, error) {
 	if len(worktrees) == 0 {
 		return nil, fmt.Errorf("no worktrees to expand")
 	}
@@ -18,24 +18,68 @@ func Expand(cfg *Config, worktrees []Worktree) ([]*mux.Manifest, error) {
 		return nil, fmt.Errorf("project template has no surfaces")
 	}
 
-	var manifests []*mux.Manifest
+	replacer := strings.NewReplacer(
+		"$AGENT", cfg.Agent,
+		"${AGENT}", cfg.Agent,
+	)
+
+	tabFormat := cfg.WorkspaceFormat
+	if tabFormat == "" {
+		tabFormat = DefaultWorkspaceFormat
+	}
+
+	var surfaces []mux.ManifestSurface
+	var startupSession string
 	for _, wt := range worktrees {
 		if wt.Bare {
 			continue
 		}
-		m, err := expandWorktree(cfg, wt)
-		if err != nil {
-			return nil, fmt.Errorf("worktree %q: %w", wt.Path, err)
+		branch := wt.Branch
+		if branch == "" {
+			branch = "default"
 		}
-		manifests = append(manifests, m)
+		safeBranch := SanitizeBranch(branch)
+		dirname := filepath.Base(wt.Path)
+		tabName := formatWorkspaceName(tabFormat, cfg.Name, safeBranch, dirname)
+
+		// Each template surface becomes a tab for this worktree.
+		// For a single-surface template, the tab name is the worktree name.
+		// For multi-surface templates, tabs are named "worktree:surface".
+		for _, ts := range cfg.Tmpl.Surface {
+			surfName := tabName
+			sessionName := tabName
+			if len(cfg.Tmpl.Surface) > 1 {
+				surfName = tabName + ":" + ts.Name
+				sessionName = tabName + ":" + ts.Name
+			}
+
+			surf := mux.ManifestSurface{
+				Name:    surfName,
+				Session: sessionName,
+				Cwd:     wt.Path,
+				Command: replacer.Replace(ts.Command),
+			}
+			surf.Split = expandSplits(tabName, wt.Path, ts.Split, replacer)
+			surfaces = append(surfaces, surf)
+
+			if startupSession == "" {
+				startupSession = sessionName
+			}
+		}
 	}
-	if len(manifests) == 0 {
+	if len(surfaces) == 0 {
 		return nil, fmt.Errorf("no non-bare worktrees to expand")
 	}
-	return manifests, nil
+
+	return &mux.Manifest{
+		Name:    cfg.Name,
+		Version: 1,
+		Startup: startupSession,
+		Surface: surfaces,
+	}, nil
 }
 
-// formatWorkspaceName applies the workspace_format template.
+// formatWorkspaceName applies the tab/workspace name format template.
 // Supported placeholders: {project}, {branch}, {dirname}
 func formatWorkspaceName(format, project, branch, dirname string) string {
 	r := strings.NewReplacer(
@@ -46,65 +90,18 @@ func formatWorkspaceName(format, project, branch, dirname string) string {
 	return r.Replace(format)
 }
 
-func expandWorktree(cfg *Config, wt Worktree) (*mux.Manifest, error) {
-	branch := wt.Branch
-	if branch == "" {
-		branch = "default"
-	}
-	safeBranch := SanitizeBranch(branch)
-	dirname := filepath.Base(wt.Path)
-
-	// Apply workspace name format.
-	format := cfg.WorkspaceFormat
-	if format == "" {
-		format = DefaultWorkspaceFormat
-	}
-	wsName := formatWorkspaceName(format, cfg.Name, safeBranch, dirname)
-
-	replacer := strings.NewReplacer(
-		"$AGENT", cfg.Agent,
-		"${AGENT}", cfg.Agent,
-	)
-
-	var surfaces []mux.ManifestSurface
-	for _, ts := range cfg.Tmpl.Surface {
-		sessionName := wsName
-		if len(cfg.Tmpl.Surface) > 1 {
-			sessionName = wsName + ":" + ts.Name
-		}
-
-		surf := mux.ManifestSurface{
-			Name:    ts.Name,
-			Session: sessionName,
-			Cwd:     wt.Path,
-			Command: replacer.Replace(ts.Command),
-		}
-
-		surf.Split = expandSplits(wsName, wt.Path, ts.Split, replacer)
-
-		surfaces = append(surfaces, surf)
-	}
-
-	return &mux.Manifest{
-		Name:    wsName,
-		Version: 1,
-		Startup: surfaces[0].Session,
-		Surface: surfaces,
-	}, nil
-}
-
-func expandSplits(wsName, cwd string, splits []TemplateSplit, replacer *strings.Replacer) []mux.ManifestSplit {
+func expandSplits(tabName, cwd string, splits []TemplateSplit, replacer *strings.Replacer) []mux.ManifestSplit {
 	var result []mux.ManifestSplit
 	for _, tsp := range splits {
 		ms := mux.ManifestSplit{
 			Name:      tsp.Name,
-			Session:   wsName + ":" + tsp.Name,
+			Session:   tabName + ":" + tsp.Name,
 			Direction: tsp.Direction,
 			Cwd:       cwd,
 			Command:   replacer.Replace(tsp.Command),
 		}
 		if len(tsp.Split) > 0 {
-			ms.Split = expandSplits(wsName, cwd, tsp.Split, replacer)
+			ms.Split = expandSplits(tabName, cwd, tsp.Split, replacer)
 		}
 		result = append(result, ms)
 	}

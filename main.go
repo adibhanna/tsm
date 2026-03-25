@@ -1627,7 +1627,7 @@ Usage:
   tsm mux doctor <workspace>   Diagnose workspace health
   tsm mux status               Show terminal and backend info
   tsm mux help                 Show all mux commands
-  tsm project ...              Worktree project workspaces (cmux only)
+  tsm project ...              Worktree project workspaces
   tsm project help             Show all project commands
   tsm doctor                   Show runtime diagnostics
   tsm doctor clean-stale       Remove stale session sockets

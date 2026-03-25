@@ -163,16 +163,6 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// ProjectNameFromWorkspace extracts the project name from a workspace name.
-// For the default format "{project}:{branch}", this is the prefix before the first ":".
-// Returns the project name, or empty string if not detected.
-func ProjectNameFromWorkspace(wsName string) string {
-	if i := strings.Index(wsName, ":"); i > 0 {
-		return wsName[:i]
-	}
-	return ""
-}
-
 // SanitizeBranch converts a branch name to a safe session/workspace name component.
 // "feat/auth" → "feat-auth", "refs/heads/main" → "refs-heads-main"
 func SanitizeBranch(branch string) string {

@@ -166,56 +166,6 @@ func (o *Orchestrator) openSplits(wsID string, splits []ManifestSplit, jobs *[]a
 	return nil
 }
 
-// ProjectSwitch switches to the next or previous workspace within the same project.
-// direction: +1 for next, -1 for prev (with wrap-around).
-func (o *Orchestrator) ProjectSwitch(direction int) error {
-	awp, ok := o.Backend.(ActiveWorkspaceProvider)
-	if !ok {
-		return fmt.Errorf("backend %q does not support workspace detection", o.Backend.Name())
-	}
-
-	current, err := awp.GetActiveWorkspace()
-	if err != nil {
-		return fmt.Errorf("get active workspace: %w", err)
-	}
-
-	// Find the project prefix from the current workspace name.
-	prefix := ""
-	if i := strings.Index(current.Name, ":"); i > 0 {
-		prefix = current.Name[:i+1] // e.g. "app:"
-	}
-	if prefix == "" {
-		return fmt.Errorf("workspace %q does not belong to a project", current.Name)
-	}
-
-	// List all workspaces and filter to the same project.
-	all, err := o.Backend.ListWorkspaces()
-	if err != nil {
-		return fmt.Errorf("list workspaces: %w", err)
-	}
-
-	var projectWS []Workspace
-	currentIdx := -1
-	for _, w := range all {
-		if strings.HasPrefix(w.Name, prefix) {
-			if w.ID == current.ID {
-				currentIdx = len(projectWS)
-			}
-			projectWS = append(projectWS, w)
-		}
-	}
-
-	if len(projectWS) <= 1 {
-		return nil // nothing to switch to
-	}
-	if currentIdx < 0 {
-		return fmt.Errorf("current workspace not found in project list")
-	}
-
-	targetIdx := (currentIdx + direction + len(projectWS)) % len(projectWS)
-	return o.Backend.SelectWorkspace(projectWS[targetIdx].ID)
-}
-
 // Split creates a new split in the focused pane and attaches a tsm session.
 func (o *Orchestrator) Split(dir Direction, sessionName string, cmd []string) error {
 	cmdStr := ""
