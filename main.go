@@ -716,17 +716,24 @@ func launchTUI(opts tui.Options) {
 		}
 	}
 
-	// If the user picked a project worktree, run tsm project open.
+	// If the user picked a project worktree, run tsm project open <name> <branch>.
 	type projectPicker interface {
 		ProjectPickTarget() string
 	}
 	if m, ok := finalModel.(projectPicker); ok && m.ProjectPickTarget() != "" {
+		target := m.ProjectPickTarget()
+		parts := strings.SplitN(target, "\t", 2)
+		projName := parts[0]
+		args := []string{"project", "open", projName}
+		if len(parts) > 1 && parts[1] != "" {
+			args = append(args, parts[1])
+		}
 		exe, err := os.Executable()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		cmd := exec.Command(exe, "project", "open", m.ProjectPickTarget())
+		cmd := exec.Command(exe, args...)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

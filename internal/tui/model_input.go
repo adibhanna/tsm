@@ -499,7 +499,7 @@ func (m Model) handleProjectPickKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		if m.projectCursor < len(m.projectWorktrees) {
 			item := m.projectWorktrees[m.projectCursor]
-			m.projectPickTarget = item.Project
+			m.projectPickTarget = item.Project + "\t" + item.Branch
 			m.state = stateNormal
 			return m, tea.Quit
 		}
