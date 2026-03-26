@@ -256,10 +256,10 @@ type Model struct {
 	muxOpenTarget   string // workspace to open after quit
 
 	// Project worktree picker
-	projectWorktrees      []projectWorktreeItem
-	projectCursor         int
-	projectPickProject    string // project name to open after quit
-	projectPickBranch     string // branch to open (empty = all)
+	projectWorktrees   []projectWorktreeItem
+	projectCursor      int
+	projectPickProject string // project name to open after quit
+	projectPickBranch  string // branch to open (empty = all)
 
 	// Activity log
 	logLines  []string
