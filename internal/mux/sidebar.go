@@ -17,11 +17,7 @@ func SidebarSync(backend Backend, sessCfg session.Config, workspaceName string) 
 	}
 
 	// Collect all session names from the manifest.
-	var sessionNames []string
-	for _, surf := range manifest.Surface {
-		sessionNames = append(sessionNames, surf.Session)
-		sessionNames = append(sessionNames, collectManifestSplitSessions(surf.Split)...)
-	}
+	sessionNames := CollectManifestSessions(manifest)
 
 	// Fetch live sessions and their process/agent info.
 	allSessions, err := session.ListSessions(sessCfg)
@@ -68,13 +64,24 @@ func SidebarSync(backend Backend, sessCfg session.Config, workspaceName string) 
 	return nil
 }
 
-// collectManifestSplitSessions recursively collects session names from nested splits.
-func collectManifestSplitSessions(splits []ManifestSplit) []string {
+// CollectManifestSessions returns all session names from a manifest's surfaces
+// and their splits (recursively).
+func CollectManifestSessions(m *Manifest) []string {
+	var names []string
+	for _, surf := range m.Surface {
+		names = append(names, surf.Session)
+		names = append(names, collectSplitSessions(surf.Split)...)
+	}
+	return names
+}
+
+// collectSplitSessions recursively collects session names from nested splits.
+func collectSplitSessions(splits []ManifestSplit) []string {
 	var names []string
 	for _, sp := range splits {
 		names = append(names, sp.Session)
 		if len(sp.Split) > 0 {
-			names = append(names, collectManifestSplitSessions(sp.Split)...)
+			names = append(names, collectSplitSessions(sp.Split)...)
 		}
 	}
 	return names
@@ -95,7 +102,7 @@ func SidebarSyncManifests(backend Backend, sessCfg session.Config, manifests []*
 		var sessions []string
 		for _, surf := range m.Surface {
 			sessions = append(sessions, surf.Session)
-			sessions = append(sessions, collectManifestSplitSessions(surf.Split)...)
+			sessions = append(sessions, collectSplitSessions(surf.Split)...)
 		}
 		workspaces = append(workspaces, wsInfo{name: m.Name, sessions: sessions})
 		allSessionNames = append(allSessionNames, sessions...)

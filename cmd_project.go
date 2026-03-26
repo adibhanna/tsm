@@ -11,28 +11,6 @@ import (
 	"github.com/adibhanna/tsm/internal/session"
 )
 
-// collectManifestSessions returns all session names from a manifest's surfaces
-// and their splits (recursively).
-func collectManifestSessions(m *mux.Manifest) []string {
-	var names []string
-	for _, surf := range m.Surface {
-		names = append(names, surf.Session)
-		names = append(names, collectSplitSessions(surf.Split)...)
-	}
-	return names
-}
-
-func collectSplitSessions(splits []mux.ManifestSplit) []string {
-	var names []string
-	for _, sp := range splits {
-		names = append(names, sp.Session)
-		if len(sp.Split) > 0 {
-			names = append(names, collectSplitSessions(sp.Split)...)
-		}
-	}
-	return names
-}
-
 func cmdProject() {
 	if len(os.Args) < 3 {
 		printProjectUsage()
@@ -163,20 +141,9 @@ func cmdProjectInit() {
 // resolveWorktrees loads worktrees from config entries or auto-detects them,
 // then optionally filters to a single branch.
 func resolveWorktrees(cfg *project.Config, branchFilter string) ([]project.Worktree, error) {
-	var worktrees []project.Worktree
-	if len(cfg.Trees) > 0 {
-		for _, e := range cfg.Trees {
-			worktrees = append(worktrees, project.Worktree{
-				Path:   e.Path,
-				Branch: e.Branch,
-			})
-		}
-	} else {
-		var err error
-		worktrees, err = project.DetectWorktrees(cfg.Root)
-		if err != nil {
-			return nil, fmt.Errorf("detecting worktrees: %w", err)
-		}
+	worktrees, err := cfg.ResolveWorktrees()
+	if err != nil {
+		return nil, fmt.Errorf("detecting worktrees: %w", err)
 	}
 
 	if branchFilter != "" {
@@ -263,7 +230,7 @@ func cmdProjectClose() {
 
 	sessCfg := session.DefaultConfig()
 	var killed int
-	for _, s := range collectManifestSessions(manifest) {
+	for _, s := range mux.CollectManifestSessions(manifest) {
 		if err := session.KillSession(sessCfg, s); err == nil {
 			fmt.Printf("  killed session %q\n", s)
 			killed++
@@ -306,13 +273,14 @@ func cmdProjectAdd() {
 		absPath = wtPath
 	}
 
-	// Create the git worktree.
-	cmd := exec.Command("git", "-C", cfg.Root, "worktree", "add", absPath, "-b", branch)
+	// Create the git worktree. Use "--" to prevent branch names like "--force"
+	// from being interpreted as flags.
+	cmd := exec.Command("git", "-C", cfg.Root, "worktree", "add", "-b", branch, "--", absPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		// Branch might already exist, try without -b.
-		cmd = exec.Command("git", "-C", cfg.Root, "worktree", "add", absPath, branch)
+		cmd = exec.Command("git", "-C", cfg.Root, "worktree", "add", "--", absPath, branch)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
@@ -367,7 +335,7 @@ func cmdProjectRemove() {
 	worktrees := []project.Worktree{{Path: removed.Path, Branch: removed.Branch}}
 	if manifest, err := project.Expand(cfg, worktrees); err == nil {
 		sessCfg := session.DefaultConfig()
-		for _, s := range collectManifestSessions(manifest) {
+		for _, s := range mux.CollectManifestSessions(manifest) {
 			_ = session.KillSession(sessCfg, s)
 		}
 	}
@@ -409,14 +377,7 @@ func cmdProjectPick() {
 		if err != nil {
 			continue
 		}
-		var worktrees []project.Worktree
-		if len(cfg.Trees) > 0 {
-			for _, e := range cfg.Trees {
-				worktrees = append(worktrees, project.Worktree{Path: e.Path, Branch: e.Branch})
-			}
-		} else {
-			worktrees, _ = project.DetectWorktrees(cfg.Root)
-		}
+		worktrees, _ := cfg.ResolveWorktrees()
 		for _, wt := range worktrees {
 			if wt.Bare {
 				continue

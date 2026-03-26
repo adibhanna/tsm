@@ -186,8 +186,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.state = stateProjectPick
 				m.projectCursor = 0
 			} else {
-				m.status = "No projects configured"
-				return m, clearStatusAfter(2 * time.Second)
+				// Lazy fetch — first press triggers the load.
+				m.status = "Loading projects..."
+				return m, fetchProjectWorktreesCmd
 			}
 		case m.inlineFilterEnabled() && m.isTextInput(msg):
 			m.filterText += msg.Text
@@ -499,7 +500,8 @@ func (m Model) handleProjectPickKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		if m.projectCursor < len(m.projectWorktrees) {
 			item := m.projectWorktrees[m.projectCursor]
-			m.projectPickTarget = item.Project + "\t" + item.Branch
+			m.projectPickProject = item.Project
+			m.projectPickBranch = item.Branch
 			m.state = stateNormal
 			return m, tea.Quit
 		}

@@ -179,14 +179,7 @@ func fetchProjectWorktreesCmd() tea.Msg {
 		if err != nil {
 			continue
 		}
-		var worktrees []project.Worktree
-		if len(cfg.Trees) > 0 {
-			for _, e := range cfg.Trees {
-				worktrees = append(worktrees, project.Worktree{Path: e.Path, Branch: e.Branch})
-			}
-		} else {
-			worktrees, _ = project.DetectWorktrees(cfg.Root)
-		}
+		worktrees, _ := cfg.ResolveWorktrees()
 		for _, wt := range worktrees {
 			if wt.Bare {
 				continue
@@ -263,9 +256,10 @@ type Model struct {
 	muxOpenTarget   string // workspace to open after quit
 
 	// Project worktree picker
-	projectWorktrees []projectWorktreeItem
-	projectCursor    int
-	projectPickTarget string // "project:branch" to open after quit
+	projectWorktrees      []projectWorktreeItem
+	projectCursor         int
+	projectPickProject    string // project name to open after quit
+	projectPickBranch     string // branch to open (empty = all)
 
 	// Activity log
 	logLines  []string
@@ -320,8 +314,12 @@ func (m Model) MuxOpenTarget() string {
 	return m.muxOpenTarget
 }
 
-func (m Model) ProjectPickTarget() string {
-	return m.projectPickTarget
+func (m Model) ProjectPickProject() string {
+	return m.projectPickProject
+}
+
+func (m Model) ProjectPickBranch() string {
+	return m.projectPickBranch
 }
 
 func (m Model) Options() Options {
@@ -582,7 +580,7 @@ func (m *Model) clampCursor() {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(fetchSessionsCmd, fetchMuxInfoCmd, fetchProjectWorktreesCmd, autoRefreshCmd())
+	return tea.Batch(fetchSessionsCmd, fetchMuxInfoCmd, autoRefreshCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -711,6 +709,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case projectPickMsg:
 		m.projectWorktrees = msg.items
+		if len(msg.items) > 0 {
+			m.state = stateProjectPick
+			m.projectCursor = 0
+			m.status = ""
+		} else {
+			m.status = "No projects configured"
+			return m, clearStatusAfter(2 * time.Second)
+		}
 
 	case statusClearMsg:
 		m.status = ""

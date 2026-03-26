@@ -32,7 +32,7 @@ const (
 	ActionLogUp           Action = "log_up"
 	ActionLogDown         Action = "log_down"
 	ActionMuxOpen         Action = "mux_open"
-	ActionProjectPick    Action = "project_pick"
+	ActionProjectPick     Action = "project_pick"
 )
 
 var allActions = []Action{

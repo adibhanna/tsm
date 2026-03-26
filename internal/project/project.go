@@ -163,6 +163,19 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// ResolveWorktrees returns worktrees from explicit config entries or auto-detects
+// them from the git repo root.
+func (c *Config) ResolveWorktrees() ([]Worktree, error) {
+	if len(c.Trees) > 0 {
+		wt := make([]Worktree, len(c.Trees))
+		for i, e := range c.Trees {
+			wt[i] = Worktree{Path: e.Path, Branch: e.Branch}
+		}
+		return wt, nil
+	}
+	return DetectWorktrees(c.Root)
+}
+
 // SanitizeBranch converts a branch name to a safe session/workspace name component.
 // "feat/auth" → "feat-auth", "refs/heads/main" → "refs-heads-main"
 func SanitizeBranch(branch string) string {
