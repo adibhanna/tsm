@@ -185,7 +185,7 @@ func DefaultBindings(keymap Keymap) Bindings {
 		mustSet(ActionFilter, "ctrl+f")
 		mustSet(ActionSort, "ctrl+s")
 		mustSet(ActionMuxOpen, "ctrl+w")
-		mustSet(ActionProjectPick, "ctrl+o")
+		mustSet(ActionProjectPick, "ctrl+g")
 		mustSet(ActionQuit, "q")
 	default:
 		mustSet(ActionToggleSelect, "space")
