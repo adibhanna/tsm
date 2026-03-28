@@ -95,7 +95,7 @@ func Attach(cfg Config, name string) error {
 		defer closeDone()
 		var filter outputFilter
 		for {
-			tag, payload, err := ReadMessage(conn, 1*time.Second)
+			tag, payload, err := ReadMessage(conn, 10*time.Second)
 			if err != nil {
 				var netErr net.Error
 				if errors.As(err, &netErr) && netErr.Timeout() {

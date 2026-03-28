@@ -28,8 +28,13 @@ func SendMessage(conn net.Conn, tag Tag, payload []byte) error {
 }
 
 // ReadMessage reads a header + payload from a connection.
+// A zero timeout clears the deadline (blocking read).
 func ReadMessage(conn net.Conn, timeout time.Duration) (Tag, []byte, error) {
-	conn.SetReadDeadline(time.Now().Add(timeout))
+	if timeout > 0 {
+		conn.SetReadDeadline(time.Now().Add(timeout))
+	} else {
+		conn.SetReadDeadline(time.Time{})
+	}
 
 	var hdrBuf [HeaderSize]byte
 	if _, err := io.ReadFull(conn, hdrBuf[:]); err != nil {

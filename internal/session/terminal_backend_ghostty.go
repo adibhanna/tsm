@@ -52,7 +52,10 @@ func (g *ghosttyTerminal) Consume(data []byte) {
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.tracker.Consume(data)
+	// Only track alt-screen mode (needed for Snapshot prefix). Skip the
+	// full modeTracker.Consume to avoid its allocation + parsing overhead
+	// on every PTY read — the Ghostty VT backend handles everything else.
+	g.tracker.consumeAltScreen(data)
 	C.ghostty_terminal_vt_write(g.term, (*C.uint8_t)(unsafe.Pointer(&data[0])), C.size_t(len(data)))
 }
 

@@ -209,7 +209,7 @@ func SpawnDaemon(name string, shellCmd []string) error {
 }
 
 func (d *Daemon) readPTY() {
-	buf := make([]byte, 4096)
+	buf := make([]byte, 32768)
 	for {
 		n, err := d.ptmx.Read(buf)
 		if n > 0 {
@@ -400,6 +400,7 @@ func (d *Daemon) renameSession(newName string) error {
 
 func (d *Daemon) broadcast(tag Tag, data []byte) {
 	msg := MarshalMessage(tag, data)
+	defer ReleaseMessage(msg)
 
 	// Read attached flag while holding the lock to avoid a data race
 	// with markClientAttached.

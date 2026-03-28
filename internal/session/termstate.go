@@ -21,6 +21,7 @@ type TerminalBackend interface {
 type modeTracker struct {
 	mu      sync.RWMutex
 	pending []byte
+	scratch []byte // reusable buffer to avoid per-Consume allocations
 
 	altScreenMode  int
 	altScreen      bool
@@ -42,7 +43,11 @@ func (t *modeTracker) Consume(data []byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	buf := make([]byte, 0, len(t.pending)+len(data))
+	needed := len(t.pending) + len(data)
+	if cap(t.scratch) < needed {
+		t.scratch = make([]byte, 0, needed)
+	}
+	buf := t.scratch[:0]
 	buf = append(buf, t.pending...)
 	buf = append(buf, data...)
 	t.pending = t.pending[:0]
@@ -177,6 +182,61 @@ func (t *modeTracker) applyPrivateModes(params string, enabled bool) {
 		case 2004:
 			t.bracketedPaste = enabled
 		}
+	}
+}
+
+// consumeAltScreen is a lightweight scanner that only tracks alt-screen mode
+// changes (47, 1047, 1049). Used by the Ghostty backend to avoid the full
+// Consume overhead on every PTY read.
+func (t *modeTracker) consumeAltScreen(data []byte) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	for i := 0; i < len(data); {
+		if data[i] != 0x1b {
+			i++
+			continue
+		}
+		// Need at least ESC [ ?
+		if i+2 >= len(data) || data[i+1] != '[' || data[i+2] != '?' {
+			i++
+			continue
+		}
+		// Scan digits and semicolons
+		j := i + 3
+		for j < len(data) {
+			b := data[j]
+			if (b >= '0' && b <= '9') || b == ';' || b == ':' {
+				j++
+				continue
+			}
+			break
+		}
+		if j >= len(data) {
+			break // incomplete sequence at end of buffer
+		}
+		final := data[j]
+		if final == 'h' || final == 'l' {
+			enabled := final == 'h'
+			params := string(data[i+3 : j])
+			for _, part := range strings.Split(params, ";") {
+				modePart, _, _ := strings.Cut(part, ":")
+				mode, err := strconv.Atoi(modePart)
+				if err != nil {
+					continue
+				}
+				switch mode {
+				case 47, 1047, 1049:
+					t.altScreen = enabled
+					if enabled {
+						t.altScreenMode = mode
+					} else if t.altScreenMode == 0 || t.altScreenMode == mode {
+						t.altScreenMode = 0
+					}
+				}
+			}
+		}
+		i = j + 1
 	}
 }
 

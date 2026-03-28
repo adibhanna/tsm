@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/binary"
 	"fmt"
+	"sync"
 )
 
 const (
@@ -140,12 +141,37 @@ func (info *InfoPayload) CwdString() string {
 	return string(info.Cwd[:n])
 }
 
+var messagePool = sync.Pool{
+	New: func() any {
+		// Start with 32KB+header to cover typical PTY read sizes.
+		b := make([]byte, 0, HeaderSize+32768)
+		return &b
+	},
+}
+
 // MarshalMessage builds a complete wire message (header + payload).
+// The returned slice is borrowed from a pool; callers that broadcast to
+// multiple writers must call ReleaseMessage when done.
 func MarshalMessage(tag Tag, payload []byte) []byte {
 	h := Header{Tag: tag, Len: uint32(len(payload))}
-	buf := h.Marshal()
-	msg := make([]byte, HeaderSize+len(payload))
-	copy(msg, buf[:])
+	hdr := h.Marshal()
+	needed := HeaderSize + len(payload)
+
+	bp := messagePool.Get().(*[]byte)
+	msg := *bp
+	if cap(msg) < needed {
+		msg = make([]byte, needed)
+	} else {
+		msg = msg[:needed]
+	}
+	copy(msg, hdr[:])
 	copy(msg[HeaderSize:], payload)
+	*bp = msg
 	return msg
+}
+
+// ReleaseMessage returns a message buffer to the pool.
+func ReleaseMessage(msg []byte) {
+	bp := &msg
+	messagePool.Put(bp)
 }

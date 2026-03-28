@@ -21,15 +21,24 @@ func AttachSwitchSequence(target string) string {
 
 type outputFilter struct {
 	pending []byte
+	buf     []byte // reusable scratch buffers
+	out     []byte
 }
 
 func (f *outputFilter) Filter(data []byte) ([]byte, string) {
-	buf := make([]byte, 0, len(f.pending)+len(data))
+	needed := len(f.pending) + len(data)
+	if cap(f.buf) < needed {
+		f.buf = make([]byte, 0, needed)
+	}
+	buf := f.buf[:0]
 	buf = append(buf, f.pending...)
 	buf = append(buf, data...)
 	f.pending = f.pending[:0]
 
-	out := make([]byte, 0, len(buf))
+	if cap(f.out) < len(buf) {
+		f.out = make([]byte, 0, cap(buf))
+	}
+	out := f.out[:0]
 	target := ""
 
 	for len(buf) > 0 {
