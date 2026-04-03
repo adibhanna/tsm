@@ -10,7 +10,8 @@ It is built around a simple model:
 
 - one daemon per session
 - one PTY per session
-- native splits and workspaces via `tsm mux` (cmux, kitty, and Ghostty backends)
+- native splits and workspaces via `tsm mux` (cmux, kitty, Ghostty, and WezTerm backends)
+- git worktree support — auto-naming, grouping, and full lifecycle management via `tsm wt`
 - fast switching between named sessions from the CLI or TUI
 
 For full-screen terminal apps like Neovim, the preferred build uses Ghostty's VT engine so reattach can restore the visible screen instead of only restoring terminal modes.
@@ -39,6 +40,7 @@ Use it when you want:
 - fast switching between sessions
 - detach / reattach from anywhere
 - a command-palette-style session picker
+- git worktree workflows with auto-named sessions and workspace layouts
 - quick Codex / Claude activity checks before switching
 - full-screen restore for Neovim and similar apps on the Ghostty-backed build
 
@@ -113,6 +115,82 @@ Override with `TSM_MUX_BACKEND=cmux` (or `kitty`, `ghostty`, `wezterm`).
 ### TUI workspace picker
 
 Press `w` in the TUI to see available workspaces and open one with Enter.
+
+## Git Worktree Support (`tsm wt`)
+
+`tsm wt` manages git worktrees and their sessions together. It auto-detects worktrees, creates sessions with `repo@branch` naming, and lets you open full workspace layouts with splits.
+
+### Auto-naming
+
+When you create a session inside a linked git worktree, tsm automatically names it `repo@branch`:
+
+```bash
+cd ~/Developer/myapp-feature-login
+tsm attach
+# → creates session "myapp@feature-login"
+```
+
+Regular (non-worktree) repos keep using the directory name. When a session is created in a repo with worktrees, tsm auto-creates sessions for all sibling worktrees.
+
+### TUI grouping
+
+The TUI groups sessions by git repository with collapsible headers:
+
+```
+  ▾ myapp (3)
+  ▸ myapp@main            ●1  2h
+    myapp@feature-login   ○0  30m
+    myapp@bugfix-42       ○0  5m
+  nvim                    ○0  10m
+```
+
+- Left/right arrows or Enter collapse/expand groups
+- Filter (`/`) matches branch and repo names
+- `Ctrl+]` opens the session picker from inside any app (neovim, claude, etc.)
+
+### Worktree commands
+
+```text
+tsm wt                           List worktrees and session status
+tsm wt <branch>                  Attach to (or create) session for a branch
+tsm wt open [--split <cmd>...]   Open worktrees as workspace with splits
+tsm wt tui                       Open TUI filtered to this repo's sessions
+tsm wt add <branch...>           Create new git worktrees + sessions
+tsm wt rm <branch...> [-f]       Remove worktrees and kill sessions
+tsm wt move <branch> <path>      Move a worktree to a new path
+tsm wt prune                     Prune stale worktrees and orphaned sessions
+tsm wt --create                  Create sessions for all existing worktrees
+```
+
+### Worktree workspaces with splits
+
+Open all worktrees as tabs with splits for your tools:
+
+```bash
+# Each worktree gets a tab with claude + nvim
+tsm wt open --split "claude" --split "nvim"
+
+# Only specific branches
+tsm wt open main feature-login --split "claude" --split "nvim"
+```
+
+The first `--split` command runs in the main pane, each additional one creates a right-split. Requires a mux backend (cmux, kitty, ghostty, or wezterm).
+
+### Worktree lifecycle
+
+```bash
+# Create worktrees and sessions in one step
+tsm wt add feature-login bugfix-42 hotfix-99
+
+# Remove worktrees and kill their sessions
+tsm wt rm feature-login bugfix-42
+
+# Force remove (uncommitted changes)
+tsm wt rm hotfix-99 -f
+
+# Clean up stale worktrees and orphaned sessions
+tsm wt prune
+```
 
 ## Install
 
@@ -284,12 +362,18 @@ Use this if you prefer to stay in the shell.
 tsm
 tsm tui [--simplified] [--keymap default|palette]
 tsm palette
-tsm claude-statusline
-tsm config install [--force]
 tsm attach [name]
 tsm detach [name]
 tsm new <name> [cmd...]
 tsm ls
+tsm wt
+tsm wt <branch>
+tsm wt open [--split <cmd>...]
+tsm wt add <branch...>
+tsm wt rm <branch...> [-f]
+tsm wt move <branch> <path>
+tsm wt prune
+tsm wt tui
 tsm mux open <workspace>
 tsm mux split <dir> <session>
 tsm mux tab new <session>
@@ -302,6 +386,8 @@ tsm doctor clean-stale
 tsm debug session <name>
 tsm rename <old> <new>
 tsm kill [name...]
+tsm claude-statusline
+tsm config install [--force]
 tsm version
 ```
 
@@ -401,25 +487,26 @@ The full TUI is the best workflow when you want:
 
 ### Full TUI default keys
 
-| Key      | Action                          |
-| -------- | ------------------------------- |
-| `↑` `↓`  | Navigate sessions               |
-| `←` `→`  | Scroll preview                  |
-| `space`  | Toggle selection                |
-| `ctrl+a` | Select or deselect all          |
-| `enter`  | Attach                          |
-| `d`      | Detach selected session(s)      |
-| `n`      | New session                     |
-| `k`      | Kill selected session(s)        |
-| `r`      | Rename session                  |
-| `c`      | Copy attach command             |
-| `s`      | Cycle sort mode                 |
-| `ctrl+o` | Toggle full / simplified layout |
-| `w`      | Open workspace                  |
-| `/`      | Filter                          |
-| `[` `]`  | Scroll activity log             |
-| `ctrl+r` | Refresh                         |
-| `q`      | Quit                            |
+| Key      | Action                                        |
+| -------- | --------------------------------------------- |
+| `↑` `↓`  | Navigate sessions (including group headers)   |
+| `←`      | Collapse repo group / scroll preview          |
+| `→`      | Expand repo group / scroll preview            |
+| `enter`  | Attach (or toggle collapse on group header)   |
+| `space`  | Toggle selection                              |
+| `ctrl+a` | Select or deselect all                        |
+| `d`      | Detach selected session(s)                    |
+| `n`      | New session                                   |
+| `k`      | Kill selected session(s)                      |
+| `r`      | Rename session                                |
+| `c`      | Copy attach command                           |
+| `s`      | Cycle sort mode (repo, name, clients, etc.)   |
+| `ctrl+o` | Toggle full / simplified layout               |
+| `w`      | Open workspace                                |
+| `/`      | Filter (matches name, branch, repo, dir)      |
+| `[` `]`  | Scroll activity log                           |
+| `ctrl+r` | Refresh                                       |
+| `q`      | Quit                                          |
 
 ## Simplified Palette
 
@@ -525,25 +612,28 @@ While the palette keymap is active:
 
 TSM has three shortcut layers:
 
-- built-in in-session shortcuts
+- client-level hotkeys (work inside any app)
+- built-in shell shortcuts
 - optional global launchers you add yourself
-- app-level mappings inside tools like Neovim
 
-Recommended workflow:
+### Client-level hotkeys
 
-- inside a fresh TSM-managed shell, use the built-in `Ctrl+]` shortcut
-- outside TSM, run `tsm p` directly or add your own global launcher
-- inside apps like Neovim, use your own app mapping or global launcher if you want picker access without returning to the shell prompt
+These work from inside any application (neovim, claude, etc.) because they are intercepted by the tsm attach client before input reaches the PTY:
 
-Built-in in-session shortcut:
+| Key      | Action                          |
+| -------- | ------------------------------- |
+| `Ctrl+\` | Detach from session             |
+| `Ctrl+]` | Open session picker (TUI)       |
 
-- `Ctrl+]` opens the simplified palette
+`Ctrl+]` is the fastest way to switch sessions — press it from anywhere, pick a session, press Enter.
 
-Supported built-in shells:
+### Shell shortcuts
 
-- `zsh`
-- `bash`
-- `fish`
+Inside fresh TSM-managed shells:
+
+- `Ctrl+]` opens the simplified palette (shell widget, works at the prompt)
+
+Supported shells: `zsh`, `bash`, `fish`
 
 That built-in shortcut is session-local. It only exists inside fresh TSM-managed shells.
 
