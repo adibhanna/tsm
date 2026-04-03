@@ -54,6 +54,7 @@ type Session struct {
 	GitBranchName     string
 	GitIsWorktree     bool
 	GitRepoRoot       string
+	GitIsSplit        bool
 	CreatedAt         uint64
 	TaskEndedAt       uint64
 	TaskExitCode      uint8
@@ -110,6 +111,7 @@ func ListSessions(cfg Config) ([]Session, error) {
 			s.GitBranchName = meta.BranchName
 			s.GitIsWorktree = meta.IsWorktree
 			s.GitRepoRoot = meta.RepoRoot
+			s.GitIsSplit = meta.IsSplit
 		}
 		sessions = append(sessions, s)
 	}

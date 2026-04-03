@@ -347,15 +347,17 @@ func (m *Model) allSessionMetrics() listMetrics {
 }
 
 func (m *Model) computeVisibleSessions() []Session {
-	// Start with all sessions, optionally restricted to a repo.
-	source := m.sessions
-	if m.normalizedOpts.FilterRepo != "" {
-		source = nil
-		for _, s := range m.sessions {
-			if s.GitRepoName == m.normalizedOpts.FilterRepo {
-				source = append(source, s)
-			}
+	// Start with all sessions, filtering out workspace split panes
+	// and optionally restricting to a specific repo.
+	var source []Session
+	for _, s := range m.sessions {
+		if s.GitIsSplit {
+			continue // hide workspace split sessions
 		}
+		if m.normalizedOpts.FilterRepo != "" && s.GitRepoName != m.normalizedOpts.FilterRepo {
+			continue
+		}
+		source = append(source, s)
 	}
 
 	var filtered []Session

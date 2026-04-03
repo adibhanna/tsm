@@ -723,6 +723,9 @@ func cmdWorktree() {
 			opts.FilterRepo = gitCtx.RepoName
 			launchTUI(opts)
 			return
+		case "open":
+			cmdWorktreeOpen(cwd, gitCtx, args[1:])
+			return
 		}
 	}
 
@@ -998,6 +1001,151 @@ func cmdWorktreePrune(cwd string, gitCtx session.GitContext) {
 	}
 }
 
+func cmdWorktreeOpen(cwd string, gitCtx session.GitContext, args []string) {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		printWorktreeOpenUsage()
+		return
+	}
+
+	worktrees := parseGitWorktrees(cwd)
+	if len(worktrees) == 0 {
+		fmt.Fprintln(os.Stderr, "No worktrees found. Use 'tsm wt add <branch>' first.")
+		os.Exit(1)
+	}
+
+	// Parse flags.
+	var splits []string
+	var branches []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--split", "-s":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "Error: --split requires a command argument")
+				os.Exit(1)
+			}
+			i++
+			splits = append(splits, args[i])
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				fmt.Fprintf(os.Stderr, "tsm wt open: unknown option %q\n", args[i])
+				printWorktreeOpenUsage()
+				os.Exit(1)
+			}
+			branches = append(branches, args[i])
+		}
+	}
+
+	// Filter worktrees if specific branches requested.
+	if len(branches) > 0 {
+		branchSet := make(map[string]bool, len(branches))
+		for _, b := range branches {
+			branchSet[b] = true
+			branchSet[session.SanitizeBranch(b)] = true
+		}
+		var filtered []gitWorktree
+		for _, wt := range worktrees {
+			if branchSet[wt.Branch] || branchSet[session.SanitizeBranch(wt.Branch)] {
+				filtered = append(filtered, wt)
+			}
+		}
+		if len(filtered) == 0 {
+			fmt.Fprintf(os.Stderr, "No worktrees found matching: %s\n", strings.Join(branches, ", "))
+			os.Exit(1)
+		}
+		worktrees = filtered
+	}
+
+	// Build a manifest dynamically.
+	manifest := &mux.Manifest{
+		Name:    gitCtx.RepoName,
+		Version: 1,
+	}
+
+	cfg := session.DefaultConfig()
+	for _, wt := range worktrees {
+		if wt.Branch == "" {
+			continue
+		}
+		sessionName := worktreeSessionName(gitCtx, wt.Branch)
+
+		surf := mux.ManifestSurface{
+			Name:    session.SanitizeBranch(wt.Branch),
+			Session: sessionName,
+			Cwd:     wt.Path,
+		}
+
+		// First --split command goes to the main pane,
+		// subsequent ones become right-splits.
+		if len(splits) > 0 {
+			surf.Command = splits[0]
+		}
+		for j := 1; j < len(splits); j++ {
+			splitName := fmt.Sprintf("%s-%d", session.SanitizeBranch(wt.Branch), j)
+			splitSession := fmt.Sprintf("%s-%d", sessionName, j)
+			surf.Split = append(surf.Split, mux.ManifestSplit{
+				Name:      splitName,
+				Session:   splitSession,
+				Direction: "right",
+				Cwd:       wt.Path,
+				Command:   splits[j],
+			})
+			// Mark split sessions so the TUI can hide them.
+			splitCtx := session.GitContext{
+				RepoName:   gitCtx.RepoName,
+				BranchName: wt.Branch,
+				IsWorktree: true,
+				IsGitRepo:  true,
+				RepoRoot:   gitCtx.RepoRoot,
+				IsSplit:    true,
+			}
+			_ = session.WriteGitMeta(cfg, splitSession, splitCtx)
+		}
+
+		manifest.Surface = append(manifest.Surface, surf)
+
+		// Write git meta for the main session.
+		wtCtx := session.GitContext{
+			RepoName:   gitCtx.RepoName,
+			BranchName: wt.Branch,
+			IsWorktree: true,
+			IsGitRepo:  true,
+			RepoRoot:   gitCtx.RepoRoot,
+		}
+		_ = session.WriteGitMeta(cfg, sessionName, wtCtx)
+	}
+
+	if len(manifest.Surface) == 0 {
+		fmt.Fprintln(os.Stderr, "No worktrees to open")
+		os.Exit(1)
+	}
+
+	// Set startup session to current branch if inside a worktree.
+	if gitCtx.BranchName != "" {
+		manifest.Startup = session.SanitizeBranch(gitCtx.BranchName)
+	}
+
+	orch, err := newOrchestrator()
+	if err != nil {
+		if os.Getenv("TSM_SESSION") != "" {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintln(os.Stderr, "Hint: run 'tsm wt open' from outside a tsm session (detach first with Ctrl+\\)")
+			fmt.Fprintln(os.Stderr, "  or set TSM_MUX_BACKEND=cmux to force a specific backend")
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
+		os.Exit(1)
+	}
+
+	if err := orch.OpenManifest(manifest); err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening workspace: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Opened workspace %q with %d worktree(s)\n", manifest.Name, len(manifest.Surface))
+	if len(splits) > 0 {
+		fmt.Printf("Each worktree has %d split(s)\n", len(splits))
+	}
+}
+
 func cmdWorktreeAttach(cfg session.Config, gitCtx session.GitContext, worktrees []gitWorktree, sessionByName map[string]session.Session, targetBranch string) {
 	for _, wt := range worktrees {
 		if wt.Branch == targetBranch || session.SanitizeBranch(wt.Branch) == targetBranch {
@@ -1144,6 +1292,7 @@ func printWorktreeUsage() {
 Usage:
   tsm wt                           List worktrees and their session status
   tsm wt <branch>                  Attach to (or create) session for a branch
+  tsm wt open [--split <cmd>...]   Open worktrees as workspace with splits
   tsm wt tui                       Open TUI filtered to this repo's worktrees
   tsm wt add <branch...>           Create new worktrees + sessions
   tsm wt rm <branch...> [-f]       Remove worktrees and kill their sessions
@@ -1213,6 +1362,30 @@ Examples:
   tsm wt move feature-login ../new-location
 
 Aliases: move=mv
+`)
+}
+
+func printWorktreeOpenUsage() {
+	fmt.Print(`tsm wt open — open worktrees as a workspace with splits
+
+Usage:
+  tsm wt open [branch...] [--split <cmd>...]
+
+Opens a mux workspace where each worktree is a tab. Use --split to add
+panes to each tab (e.g., one for your editor, one for an AI agent).
+
+Examples:
+  tsm wt open                              All worktrees, one tab each
+  tsm wt open main feature-x               Only specific worktrees
+  tsm wt open --split "claude"             Each tab: shell left, claude right
+  tsm wt open --split "nvim ." --split "claude"
+                                            Three panes per tab
+
+Flags:
+  --split, -s <cmd>   Add a right-split pane running <cmd> to each tab.
+                      Can be repeated for multiple splits.
+
+Requires a mux backend (cmux, kitty, ghostty, or wezterm).
 `)
 }
 
@@ -2276,10 +2449,10 @@ Usage:
   tsm kill [name...]           Kill current or named sessions
   tsm wt                       List worktrees and session status
   tsm wt <branch>              Attach/create session for a worktree
-  tsm wt add <branch> [path]   Create a new worktree + session
-  tsm wt rm <branch>           Remove a worktree and its session
-  tsm wt move <branch> <path>  Move a worktree to a new path
-  tsm wt prune                 Prune stale worktrees + sessions
+  tsm wt open [--split <cmd>]  Open worktrees as workspace with splits
+  tsm wt add <branch...>       Create new worktrees + sessions
+  tsm wt rm <branch...>        Remove worktrees and their sessions
+  tsm wt help                  Show all worktree commands
   tsm mux open <workspace>     Open workspace from manifest
   tsm mux new <workspace>      Create a new workspace manifest
   tsm mux edit                 Open workspace dir in $EDITOR

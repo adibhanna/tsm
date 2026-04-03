@@ -15,14 +15,18 @@ type Orchestrator struct {
 	SessCfg session.Config
 }
 
-// Open loads a workspace manifest and creates all surfaces and panes,
-// auto-creating tsm sessions and attaching them.
+// Open loads a workspace manifest from disk and opens it.
 func (o *Orchestrator) Open(workspaceName string) error {
 	manifest, err := LoadManifest(workspaceName)
 	if err != nil {
 		return fmt.Errorf("load workspace: %w", err)
 	}
+	return o.OpenManifest(manifest)
+}
 
+// OpenManifest creates all surfaces and panes from a manifest,
+// auto-creating tsm sessions and attaching them.
+func (o *Orchestrator) OpenManifest(manifest *Manifest) error {
 	// Find or create the cmux workspace.
 	wsID, err := o.findOrCreateWorkspace(manifest.Name)
 	if err != nil {
