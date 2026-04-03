@@ -50,6 +50,10 @@ type Session struct {
 	AgentOutputStyle  string
 	AgentProjectDir   string
 	AgentWorktreePath string
+	GitRepoName       string
+	GitBranchName     string
+	GitIsWorktree     bool
+	GitRepoRoot       string
 	CreatedAt         uint64
 	TaskEndedAt       uint64
 	TaskExitCode      uint8
@@ -91,7 +95,7 @@ func ListSessions(cfg Config) ([]Session, error) {
 			continue
 		}
 
-		sessions = append(sessions, Session{
+		s := Session{
 			Name:         entry.Name(),
 			PID:          strconv.Itoa(int(info.PID)),
 			Clients:      int(info.ClientsLen),
@@ -100,7 +104,14 @@ func ListSessions(cfg Config) ([]Session, error) {
 			CreatedAt:    info.CreatedAt,
 			TaskEndedAt:  info.TaskEndedAt,
 			TaskExitCode: info.TaskExitCode,
-		})
+		}
+		if meta, err := ReadGitMeta(cfg, entry.Name()); err == nil {
+			s.GitRepoName = meta.RepoName
+			s.GitBranchName = meta.BranchName
+			s.GitIsWorktree = meta.IsWorktree
+			s.GitRepoRoot = meta.RepoRoot
+		}
+		sessions = append(sessions, s)
 	}
 
 	return sessions, nil

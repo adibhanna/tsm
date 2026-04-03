@@ -97,6 +97,8 @@ func main() {
 		cmdDoctor()
 	case "debug":
 		cmdDebug()
+	case "worktree", "wt":
+		cmdWorktree()
 	case "claude-statusline":
 		cmdClaudeStatusline()
 	case "mux", "m":
@@ -143,22 +145,26 @@ func cmdAttach() {
 		}
 		switch len(sessions) {
 		case 0:
-			name, err := suggestSessionName(cfg, sessions)
+			result, err := suggestSessionName(cfg, sessions)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error creating session name: %v\n", err)
 				os.Exit(1)
 			}
-			if err := attachSession(cfg, name, true); err != nil {
-				fmt.Fprintln(os.Stderr, formatSessionActionError("attach", name, err))
-				os.Exit(1)
+			if result.Git.IsGitRepo {
+				_ = session.WriteGitMeta(cfg, result.Name, result.Git)
+				if cwd, err := os.Getwd(); err == nil {
+					autoCreateWorktreeSessions(cfg, cwd, result.Git)
+				}
 			}
-			fmt.Fprintf(os.Stdout, "\r\n[detached from %s]\r\n", name)
+			if err := attachSession(cfg, result.Name, true); err != nil {
+				handleAttachError(result.Name, err)
+			}
+			fmt.Fprintf(os.Stdout, "\r\n[detached from %s]\r\n", result.Name)
 			return
 		case 1:
 			name := sessions[0].Name
 			if err := attachSession(cfg, name, false); err != nil {
-				fmt.Fprintln(os.Stderr, formatSessionActionError("attach", name, err))
-				os.Exit(1)
+				handleAttachError(name, err)
 			}
 			fmt.Fprintf(os.Stdout, "\r\n[detached from %s]\r\n", name)
 			return
@@ -177,16 +183,7 @@ func cmdAttach() {
 		return
 	}
 	if err := attachSession(cfg, name, true); err != nil {
-		var switchErr *session.SwitchSessionError
-		if errors.As(err, &switchErr) {
-			if err := execAttachTarget(switchErr.Target); err != nil {
-				fmt.Fprintf(os.Stderr, "Switch error: %v\n", err)
-				os.Exit(1)
-			}
-			return
-		}
-		fmt.Fprintln(os.Stderr, formatSessionActionError("attach", name, err))
-		os.Exit(1)
+		handleAttachError(name, err)
 	}
 	fmt.Fprintf(os.Stdout, "\r\n[detached from %s]\r\n", name)
 }
@@ -203,16 +200,7 @@ func cmdToggle() {
 		return
 	}
 	if err := attachSession(cfg, target, false); err != nil {
-		var switchErr *session.SwitchSessionError
-		if errors.As(err, &switchErr) {
-			if err := execAttachTarget(switchErr.Target); err != nil {
-				fmt.Fprintf(os.Stderr, "Switch error: %v\n", err)
-				os.Exit(1)
-			}
-			return
-		}
-		fmt.Fprintln(os.Stderr, formatSessionActionError("attach", target, err))
-		os.Exit(1)
+		handleAttachError(target, err)
 	}
 	fmt.Fprintf(os.Stdout, "\r\n[detached from %s]\r\n", target)
 }
@@ -245,6 +233,28 @@ func cmdConfig() {
 		printConfigUsage()
 		os.Exit(1)
 	}
+}
+
+// handleAttachError handles errors from attachSession, including session
+// switches triggered by escape sequences from inside the session, and
+// picker requests triggered by Ctrl+].
+func handleAttachError(name string, err error) {
+	var switchErr *session.SwitchSessionError
+	if errors.As(err, &switchErr) {
+		if err := execAttachTarget(switchErr.Target); err != nil {
+			fmt.Fprintf(os.Stderr, "Switch error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	var pickerErr *session.PickerRequestError
+	if errors.As(err, &pickerErr) {
+		// Launch TUI picker, then attach to the selected session.
+		launchTUI(mustResolveTUIOptions(nil))
+		return
+	}
+	fmt.Fprintln(os.Stderr, formatSessionActionError("attach", name, err))
+	os.Exit(1)
 }
 
 func emitLocalSwitchRequest(target string) bool {
@@ -308,6 +318,13 @@ func attachSession(cfg session.Config, name string, createIfMissing bool) error 
 			if err := session.SpawnDaemon(name, nil); err != nil {
 				return fmt.Errorf("create session %q: %w", name, err)
 			}
+			// Write git metadata sidecar and auto-create sibling worktree sessions.
+			if cwd, err := os.Getwd(); err == nil {
+				if gitCtx := session.DetectGitContext(cwd); gitCtx.IsGitRepo {
+					_ = session.WriteGitMeta(cfg, name, gitCtx)
+					autoCreateWorktreeSessions(cfg, cwd, gitCtx)
+				}
+			}
 		}
 	} else if !session.IsSocket(path) {
 		return fmt.Errorf("%w: %q", session.ErrSessionNotFound, name)
@@ -329,11 +346,19 @@ func daemonBuildWarning(cfg session.Config, name string) string {
 	return fmt.Sprintf("Warning: session %q is running an older tsm daemon build.\nRecreate the session to pick up the latest session logic if behavior looks stale.", name)
 }
 
-func suggestSessionName(cfg session.Config, sessions []session.Session) (string, error) {
+type sessionNameResult struct {
+	Name string
+	Git  session.GitContext
+}
+
+func suggestSessionName(cfg session.Config, sessions []session.Session) (sessionNameResult, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return "", err
+		return sessionNameResult{}, err
 	}
+
+	gitCtx := session.DetectGitContext(cwd)
+
 	base := filepath.Base(cwd)
 	if base == "." || base == string(filepath.Separator) || base == "" {
 		base = "shell"
@@ -341,6 +366,11 @@ func suggestSessionName(cfg session.Config, sessions []session.Session) (string,
 	base = sanitizeSessionName(base)
 	if base == "" {
 		base = "shell"
+	}
+
+	// For linked worktrees, use repo@branch naming.
+	if gitCtx.IsGitRepo && gitCtx.IsWorktree && gitCtx.BranchName != "" {
+		base = session.FormatSessionName(gitCtx)
 	}
 
 	existing := make(map[string]struct{}, len(sessions))
@@ -354,7 +384,7 @@ func suggestSessionName(cfg session.Config, sessions []session.Session) (string,
 
 	base = truncateSessionName(base, maxLen)
 	if _, ok := existing[base]; !ok && socketPathAvailable(cfg, base) {
-		return base, nil
+		return sessionNameResult{Name: base, Git: gitCtx}, nil
 	}
 
 	for i := 2; i < 10000; i++ {
@@ -365,10 +395,10 @@ func suggestSessionName(cfg session.Config, sessions []session.Session) (string,
 			candidate = truncateSessionName(candidate, maxLen)
 		}
 		if _, ok := existing[candidate]; !ok && socketPathAvailable(cfg, candidate) {
-			return candidate, nil
+			return sessionNameResult{Name: candidate, Git: gitCtx}, nil
 		}
 	}
-	return "", fmt.Errorf("could not generate unique session name")
+	return sessionNameResult{}, fmt.Errorf("could not generate unique session name")
 }
 
 func socketPathAvailable(cfg session.Config, name string) bool {
@@ -405,6 +435,13 @@ func cmdNew() {
 	if err := session.SpawnDaemon(name, shellCmd); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+	// Write git metadata sidecar for the new session.
+	cfg := session.DefaultConfig()
+	if cwd, err := os.Getwd(); err == nil {
+		if gitCtx := session.DetectGitContext(cwd); gitCtx.IsGitRepo {
+			_ = session.WriteGitMeta(cfg, name, gitCtx)
+		}
 	}
 	fmt.Printf("Session %q created\n", name)
 }
@@ -444,16 +481,38 @@ func cmdList() {
 		return
 	}
 
+	// Check if any session has git metadata to decide whether to show the BRANCH column.
+	hasGit := false
+	for _, s := range sessions {
+		if s.GitBranchName != "" {
+			hasGit = true
+			break
+		}
+	}
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tPID\tATTACHED\tUPTIME\tCMD\tDIR")
+	if hasGit {
+		fmt.Fprintln(w, "NAME\tBRANCH\tPID\tATTACHED\tUPTIME\tCMD\tDIR")
+	} else {
+		fmt.Fprintln(w, "NAME\tPID\tATTACHED\tUPTIME\tCMD\tDIR")
+	}
 	for _, s := range sessions {
 		uptime := formatUptime(s.CreatedAt)
 		attached := "-"
 		if s.Clients > 0 {
 			attached = fmt.Sprintf("yes (%d)", s.Clients)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			s.Name, s.PID, attached, uptime, s.Cmd, s.DisplayDir())
+		if hasGit {
+			branch := s.GitBranchName
+			if branch == "" {
+				branch = "-"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				s.Name, branch, s.PID, attached, uptime, s.Cmd, s.DisplayDir())
+		} else {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+				s.Name, s.PID, attached, uptime, s.Cmd, s.DisplayDir())
+		}
 	}
 	w.Flush()
 }
@@ -573,6 +632,601 @@ func cmdKill() {
 	}
 }
 
+// autoCreateWorktreeSessions detects sibling worktrees and creates sessions
+// for any that don't already have one. Runs silently — errors are ignored
+// since this is a best-effort convenience feature.
+func autoCreateWorktreeSessions(cfg session.Config, cwd string, gitCtx session.GitContext) {
+	worktrees := parseGitWorktrees(cwd)
+	if len(worktrees) <= 1 {
+		return // no sibling worktrees
+	}
+
+	sessions, err := session.ListSessions(cfg)
+	if err != nil {
+		return
+	}
+	existingByName := make(map[string]bool, len(sessions))
+	existingByDir := make(map[string]bool, len(sessions))
+	for _, s := range sessions {
+		existingByName[s.Name] = true
+		existingByDir[s.StartedIn] = true
+	}
+
+	for _, wt := range worktrees {
+		if wt.Branch == "" {
+			continue
+		}
+		if existingByDir[wt.Path] {
+			continue
+		}
+		wtCtx := session.GitContext{
+			RepoName:   gitCtx.RepoName,
+			BranchName: wt.Branch,
+			IsWorktree: true,
+			IsGitRepo:  true,
+			RepoRoot:   gitCtx.RepoRoot,
+		}
+		name := session.FormatSessionName(wtCtx)
+		if existingByName[name] {
+			continue
+		}
+		if err := session.SpawnDaemonInDir(name, nil, wt.Path); err != nil {
+			continue
+		}
+		_ = session.WriteGitMeta(cfg, name, wtCtx)
+		existingByName[name] = true
+		fmt.Fprintf(os.Stderr, "Auto-created session %q for worktree %s\n", name, wt.Branch)
+	}
+}
+
+func cmdWorktree() {
+	args := os.Args[2:]
+
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h" || args[0] == "help") {
+		printWorktreeUsage()
+		return
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	gitCtx := session.DetectGitContext(cwd)
+	if !gitCtx.IsGitRepo {
+		fmt.Fprintln(os.Stderr, "Error: not inside a git repository")
+		os.Exit(1)
+	}
+
+	// Route subcommands.
+	if len(args) > 0 {
+		switch args[0] {
+		case "add":
+			cmdWorktreeAdd(cwd, gitCtx, args[1:])
+			return
+		case "rm", "remove":
+			cmdWorktreeRemove(cwd, gitCtx, args[1:])
+			return
+		case "move", "mv":
+			cmdWorktreeMove(cwd, gitCtx, args[1:])
+			return
+		case "prune":
+			if len(args) > 1 && (args[1] == "--help" || args[1] == "-h") {
+				printWorktreePruneUsage()
+				return
+			}
+			cmdWorktreePrune(cwd, gitCtx)
+			return
+		case "tui":
+			opts := mustResolveTUIOptions(args[1:])
+			opts.FilterRepo = gitCtx.RepoName
+			launchTUI(opts)
+			return
+		}
+	}
+
+	cfg := session.DefaultConfig()
+	sessions, _ := session.ListSessions(cfg)
+	sessionByDir, sessionByName := buildSessionMaps(sessions)
+
+	// Handle flags and branch target.
+	createAll := false
+	var targetBranch string
+	for _, arg := range args {
+		switch arg {
+		case "--create", "-c":
+			createAll = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				fmt.Fprintf(os.Stderr, "tsm wt: unknown option %q\n", arg)
+				printWorktreeUsage()
+				os.Exit(1)
+			}
+			targetBranch = arg
+		}
+	}
+
+	worktrees := parseGitWorktrees(cwd)
+
+	if targetBranch != "" {
+		cmdWorktreeAttach(cfg, gitCtx, worktrees, sessionByName, targetBranch)
+		return
+	}
+
+	if createAll {
+		cmdWorktreeCreateAll(cfg, gitCtx, worktrees, sessionByName, sessionByDir)
+		return
+	}
+
+	// Default: list worktrees and their session status.
+	if len(worktrees) == 0 {
+		fmt.Println("No worktrees found. Use 'tsm wt add <branch>' to create one.")
+		return
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "BRANCH\tPATH\tSESSION\tSTATUS")
+	for _, wt := range worktrees {
+		branchDisplay := wt.Branch
+		if branchDisplay == "" {
+			branchDisplay = wt.HEAD
+			if len(branchDisplay) > 8 {
+				branchDisplay = branchDisplay[:8]
+			}
+		}
+
+		// Shorten path relative to parent of current repo.
+		pathDisplay := wt.Path
+		if parent := filepath.Dir(cwd); strings.HasPrefix(wt.Path, parent) {
+			pathDisplay = "." + wt.Path[len(parent):]
+		}
+
+		sessionName := "-"
+		status := "no session"
+		expectedName := worktreeSessionName(gitCtx, wt.Branch)
+		if s, ok := sessionByName[expectedName]; ok {
+			sessionName = s.Name
+			status = sessionStatus(s)
+		} else if s, ok := sessionByDir[wt.Path]; ok {
+			sessionName = s.Name
+			status = sessionStatus(s)
+		}
+
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", branchDisplay, pathDisplay, sessionName, status)
+	}
+	w.Flush()
+}
+
+func cmdWorktreeAdd(cwd string, gitCtx session.GitContext, args []string) {
+	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
+		printWorktreeAddUsage()
+		if len(args) == 0 {
+			os.Exit(1)
+		}
+		return
+	}
+
+	cfg := session.DefaultConfig()
+	for _, branch := range args {
+		wtPath := filepath.Join(filepath.Dir(cwd), gitCtx.RepoName+"-"+session.SanitizeBranch(branch))
+
+		branchExists := exec.Command("git", "-C", cwd, "rev-parse", "--verify", branch).Run() == nil
+
+		var gitArgs []string
+		if branchExists {
+			gitArgs = []string{"-C", cwd, "worktree", "add", wtPath, branch}
+		} else {
+			gitArgs = []string{"-C", cwd, "worktree", "add", wtPath, "-b", branch}
+		}
+
+		cmd := exec.Command("git", gitArgs...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating worktree %q: %v\n", branch, err)
+			continue
+		}
+
+		wtCtx := session.GitContext{
+			RepoName:   gitCtx.RepoName,
+			BranchName: branch,
+			IsWorktree: true,
+			IsGitRepo:  true,
+			RepoRoot:   gitCtx.RepoRoot,
+		}
+		sessionName := session.FormatSessionName(wtCtx)
+
+		if err := session.SpawnDaemonInDir(sessionName, nil, wtPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Worktree %q created but session failed: %v\n", branch, err)
+			continue
+		}
+		_ = session.WriteGitMeta(cfg, sessionName, wtCtx)
+		fmt.Printf("Created worktree %q at %s with session %q\n", branch, wtPath, sessionName)
+	}
+}
+
+func cmdWorktreeRemove(cwd string, gitCtx session.GitContext, args []string) {
+	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
+		printWorktreeRemoveUsage()
+		if len(args) == 0 {
+			os.Exit(1)
+		}
+		return
+	}
+
+	force := false
+	var branches []string
+	for _, arg := range args {
+		if arg == "--force" || arg == "-f" {
+			force = true
+		} else {
+			branches = append(branches, arg)
+		}
+	}
+	if len(branches) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: tsm wt rm <branch...> [-f]")
+		os.Exit(1)
+	}
+
+	worktrees := parseGitWorktrees(cwd)
+	cfg := session.DefaultConfig()
+
+	for _, branch := range branches {
+		var target *gitWorktree
+		for i, wt := range worktrees {
+			if wt.Branch == branch || session.SanitizeBranch(wt.Branch) == branch {
+				target = &worktrees[i]
+				break
+			}
+		}
+		if target == nil {
+			fmt.Fprintf(os.Stderr, "No worktree found for branch %q\n", branch)
+			continue
+		}
+
+		// Kill the session if it exists.
+		sessionName := worktreeSessionName(gitCtx, target.Branch)
+		if err := session.KillSession(cfg, sessionName); err == nil {
+			fmt.Printf("Killed session %q\n", sessionName)
+		}
+		_ = session.RemoveSessionArtifacts(cfg, sessionName)
+
+		// Remove the git worktree.
+		gitArgs := []string{"-C", cwd, "worktree", "remove", target.Path}
+		if force {
+			gitArgs = []string{"-C", cwd, "worktree", "remove", "--force", target.Path}
+		}
+		cmd := exec.Command("git", gitArgs...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error removing worktree %q: %v\n", branch, err)
+			continue
+		}
+		fmt.Printf("Removed worktree %q\n", branch)
+	}
+}
+
+func cmdWorktreeMove(cwd string, gitCtx session.GitContext, args []string) {
+	if len(args) < 2 || args[0] == "--help" || args[0] == "-h" {
+		printWorktreeMoveUsage()
+		if len(args) < 2 {
+			os.Exit(1)
+		}
+		return
+	}
+
+	branch := args[0]
+	newPath := args[1]
+	if !filepath.IsAbs(newPath) {
+		newPath = filepath.Join(cwd, newPath)
+	}
+
+	// Find the worktree for this branch.
+	worktrees := parseGitWorktrees(cwd)
+	var target *gitWorktree
+	for i, wt := range worktrees {
+		if wt.Branch == branch || session.SanitizeBranch(wt.Branch) == branch {
+			target = &worktrees[i]
+			break
+		}
+	}
+	if target == nil {
+		fmt.Fprintf(os.Stderr, "No worktree found for branch %q\n", branch)
+		os.Exit(1)
+	}
+
+	cmd := exec.Command("git", "-C", cwd, "worktree", "move", target.Path, newPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error moving worktree: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Update the session's git metadata with the new path.
+	cfg := session.DefaultConfig()
+	sessionName := worktreeSessionName(gitCtx, target.Branch)
+	if meta, err := session.ReadGitMeta(cfg, sessionName); err == nil {
+		meta.RepoRoot = gitCtx.RepoRoot
+		_ = session.WriteGitMeta(cfg, sessionName, meta)
+	}
+
+	fmt.Printf("Moved worktree %q to %s\n", branch, newPath)
+}
+
+func cmdWorktreePrune(cwd string, gitCtx session.GitContext) {
+	// First, find worktrees that git considers stale.
+	cmd := exec.Command("git", "-C", cwd, "worktree", "prune", "--verbose")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error pruning worktrees: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Clean up orphaned sessions — sessions with git metadata pointing
+	// to worktree paths that no longer exist.
+	cfg := session.DefaultConfig()
+	sessions, err := session.ListSessions(cfg)
+	if err != nil {
+		return
+	}
+
+	liveWorktrees := parseGitWorktrees(cwd)
+	livePaths := make(map[string]bool, len(liveWorktrees))
+	for _, wt := range liveWorktrees {
+		livePaths[wt.Path] = true
+	}
+
+	cleaned := 0
+	for _, s := range sessions {
+		if s.GitRepoName != gitCtx.RepoName || !s.GitIsWorktree {
+			continue
+		}
+		// Check if this session's worktree still exists.
+		if s.StartedIn != "" && !livePaths[s.StartedIn] {
+			if err := session.KillSession(cfg, s.Name); err == nil {
+				_ = session.RemoveSessionArtifacts(cfg, s.Name)
+				fmt.Printf("Cleaned up orphaned session %q\n", s.Name)
+				cleaned++
+			}
+		}
+	}
+	if cleaned == 0 {
+		fmt.Println("No orphaned sessions found")
+	}
+}
+
+func cmdWorktreeAttach(cfg session.Config, gitCtx session.GitContext, worktrees []gitWorktree, sessionByName map[string]session.Session, targetBranch string) {
+	for _, wt := range worktrees {
+		if wt.Branch == targetBranch || session.SanitizeBranch(wt.Branch) == targetBranch {
+			sessionName := worktreeSessionName(gitCtx, wt.Branch)
+			if s, ok := sessionByName[sessionName]; ok {
+				if switched := emitLocalSwitchRequest(s.Name); switched {
+					return
+				}
+				if err := attachSession(cfg, s.Name, false); err != nil {
+					handleAttachError(s.Name, err)
+				}
+				fmt.Fprintf(os.Stdout, "\r\n[detached from %s]\r\n", s.Name)
+				return
+			}
+			// Create a new session in the worktree directory.
+			wtCtx := session.GitContext{
+				RepoName:   gitCtx.RepoName,
+				BranchName: wt.Branch,
+				IsWorktree: true,
+				IsGitRepo:  true,
+				RepoRoot:   gitCtx.RepoRoot,
+			}
+			if err := session.SpawnDaemonInDir(sessionName, nil, wt.Path); err != nil {
+				fmt.Fprintf(os.Stderr, "Error creating session: %v\n", err)
+				os.Exit(1)
+			}
+			_ = session.WriteGitMeta(cfg, sessionName, wtCtx)
+			fmt.Printf("Session %q created for worktree %s\n", sessionName, wt.Branch)
+			if switched := emitLocalSwitchRequest(sessionName); switched {
+				return
+			}
+			if err := attachSession(cfg, sessionName, false); err != nil {
+				handleAttachError(sessionName, err)
+			}
+			fmt.Fprintf(os.Stdout, "\r\n[detached from %s]\r\n", sessionName)
+			return
+		}
+	}
+	fmt.Fprintf(os.Stderr, "No worktree found for branch %q\n", targetBranch)
+	os.Exit(1)
+}
+
+func cmdWorktreeCreateAll(cfg session.Config, gitCtx session.GitContext, worktrees []gitWorktree, sessionByName map[string]session.Session, sessionByDir map[string]session.Session) {
+	created := 0
+	for _, wt := range worktrees {
+		if wt.Branch == "" {
+			continue
+		}
+		sessionName := worktreeSessionName(gitCtx, wt.Branch)
+		if _, ok := sessionByName[sessionName]; ok {
+			continue
+		}
+		if _, ok := sessionByDir[wt.Path]; ok {
+			continue
+		}
+		wtCtx := session.GitContext{
+			RepoName:   gitCtx.RepoName,
+			BranchName: wt.Branch,
+			IsWorktree: true,
+			IsGitRepo:  true,
+			RepoRoot:   gitCtx.RepoRoot,
+		}
+		if err := session.SpawnDaemonInDir(sessionName, nil, wt.Path); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating session %q: %v\n", sessionName, err)
+			continue
+		}
+		_ = session.WriteGitMeta(cfg, sessionName, wtCtx)
+		fmt.Printf("Created session %q (%s)\n", sessionName, wt.Branch)
+		created++
+	}
+	if created == 0 {
+		fmt.Println("All worktrees already have sessions")
+	}
+}
+
+// Helpers
+
+func worktreeSessionName(gitCtx session.GitContext, branch string) string {
+	return session.FormatSessionName(session.GitContext{
+		RepoName:   gitCtx.RepoName,
+		BranchName: branch,
+		IsWorktree: true,
+		IsGitRepo:  true,
+		RepoRoot:   gitCtx.RepoRoot,
+	})
+}
+
+func sessionStatus(s session.Session) string {
+	if s.Clients > 0 {
+		return fmt.Sprintf("attached (%d)", s.Clients)
+	}
+	return "idle"
+}
+
+func buildSessionMaps(sessions []session.Session) (byDir, byName map[string]session.Session) {
+	byDir = make(map[string]session.Session, len(sessions))
+	byName = make(map[string]session.Session, len(sessions))
+	for _, s := range sessions {
+		byDir[s.StartedIn] = s
+		byName[s.Name] = s
+	}
+	return
+}
+
+type gitWorktree struct {
+	Path   string
+	HEAD   string
+	Branch string
+}
+
+func parseGitWorktrees(cwd string) []gitWorktree {
+	out, err := exec.Command("git", "-C", cwd, "worktree", "list", "--porcelain").Output()
+	if err != nil {
+		return nil
+	}
+
+	var worktrees []gitWorktree
+	var current gitWorktree
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			if current.Path != "" {
+				worktrees = append(worktrees, current)
+			}
+			current = gitWorktree{Path: strings.TrimPrefix(line, "worktree ")}
+		case strings.HasPrefix(line, "HEAD "):
+			current.HEAD = strings.TrimPrefix(line, "HEAD ")
+		case strings.HasPrefix(line, "branch refs/heads/"):
+			current.Branch = strings.TrimPrefix(line, "branch refs/heads/")
+		case strings.HasPrefix(line, "branch "):
+			current.Branch = strings.TrimPrefix(line, "branch ")
+		}
+	}
+	if current.Path != "" {
+		worktrees = append(worktrees, current)
+	}
+	return worktrees
+}
+
+func printWorktreeUsage() {
+	fmt.Print(`tsm worktree — manage git worktrees and their sessions
+
+Usage:
+  tsm wt                           List worktrees and their session status
+  tsm wt <branch>                  Attach to (or create) session for a branch
+  tsm wt tui                       Open TUI filtered to this repo's worktrees
+  tsm wt add <branch...>           Create new worktrees + sessions
+  tsm wt rm <branch...> [-f]       Remove worktrees and kill their sessions
+  tsm wt move <branch> <path>      Move a worktree to a new path
+  tsm wt prune                     Prune stale worktrees and orphaned sessions
+  tsm wt --create                  Create sessions for all existing worktrees
+  tsm wt help                      Show this help
+
+Examples:
+  tsm wt                                List all worktrees and sessions
+  tsm wt feature-login                  Attach to worktree session
+  tsm wt add feature-login              Create worktree as sibling directory
+  tsm wt add feat-1 feat-2 feat-3       Create multiple worktrees at once
+  tsm wt rm feature-login               Remove worktree and session
+  tsm wt rm feat-1 feat-2 -f            Force remove multiple worktrees
+  tsm wt move feature-login ../newdir   Move worktree directory
+  tsm wt prune                          Clean up stale worktrees + sessions
+  tsm wt --create                       Create sessions for all worktrees
+
+Aliases: worktree=wt  rm=remove  move=mv
+`)
+}
+
+func printWorktreeAddUsage() {
+	fmt.Print(`tsm wt add — create git worktrees with sessions
+
+Usage:
+  tsm wt add <branch...>
+
+Creates a new git worktree for each branch and spawns a tsm session in it.
+If the branch exists, it checks it out. If not, it creates a new branch.
+The worktree is placed as a sibling directory: ../<repo>-<branch>
+
+Examples:
+  tsm wt add feature-login             Single worktree
+  tsm wt add feat-1 feat-2 feat-3      Multiple worktrees
+`)
+}
+
+func printWorktreeRemoveUsage() {
+	fmt.Print(`tsm wt rm — remove git worktrees and their sessions
+
+Usage:
+  tsm wt rm <branch...> [-f]
+
+Kills the tsm session for each branch (if running), then removes the
+git worktree. Use -f/--force to remove worktrees with uncommitted changes.
+
+Examples:
+  tsm wt rm feature-login              Remove one worktree
+  tsm wt rm feat-1 feat-2              Remove multiple
+  tsm wt rm feat-1 feat-2 -f           Force remove (uncommitted changes)
+
+Aliases: rm=remove
+`)
+}
+
+func printWorktreeMoveUsage() {
+	fmt.Print(`tsm wt move — move a git worktree to a new path
+
+Usage:
+  tsm wt move <branch> <new-path>
+
+Moves the worktree directory and updates session metadata.
+
+Examples:
+  tsm wt move feature-login ../new-location
+
+Aliases: move=mv
+`)
+}
+
+func printWorktreePruneUsage() {
+	fmt.Print(`tsm wt prune — clean up stale worktrees and orphaned sessions
+
+Usage:
+  tsm wt prune
+
+Runs 'git worktree prune' to remove stale worktree references, then
+finds and kills tsm sessions whose worktree directories no longer exist.
+`)
+}
+
 func resolveKillTargets(args []string) []string {
 	if len(args) >= 3 {
 		return args[2:]
@@ -601,7 +1255,9 @@ func resolveTUIOptions(args []string, getenv func(string) string) (tui.Options, 
 }
 
 func resolveTUIOptionsWithConfig(args []string, getenv func(string) string, cfg appconfig.Config) (tui.Options, error) {
-	opts := tui.Options{}
+	opts := tui.Options{
+		CurrentSession: getenv("TSM_SESSION"),
+	}
 
 	if raw := cfg.TUI.Mode; raw != "" {
 		mode, err := tui.ParseMode(raw)
@@ -688,8 +1344,13 @@ func launchTUI(opts tui.Options) {
 		AttachTarget() string
 	}
 	if m, ok := finalModel.(attachTargeter); ok && m.AttachTarget() != "" {
-		_ = markSessionFocused(session.DefaultConfig(), m.AttachTarget(), os.Getenv("TSM_SESSION"))
-		if err := runAttachTarget(m.AttachTarget()); err != nil {
+		target := m.AttachTarget()
+		_ = markSessionFocused(session.DefaultConfig(), target, os.Getenv("TSM_SESSION"))
+
+		// Replace the current process with `tsm attach <target>`.
+		// This avoids TUI cleanup output interfering with the
+		// session switch escape sequence.
+		if err := execAttachTarget(target); err != nil {
 			fmt.Fprintf(os.Stderr, "Attach error: %v\n", err)
 			os.Exit(1)
 		}
@@ -1613,6 +2274,12 @@ Usage:
   tsm list                     List active sessions
   tsm rename <old> <new>       Rename a session
   tsm kill [name...]           Kill current or named sessions
+  tsm wt                       List worktrees and session status
+  tsm wt <branch>              Attach/create session for a worktree
+  tsm wt add <branch> [path]   Create a new worktree + session
+  tsm wt rm <branch>           Remove a worktree and its session
+  tsm wt move <branch> <path>  Move a worktree to a new path
+  tsm wt prune                 Prune stale worktrees + sessions
   tsm mux open <workspace>     Open workspace from manifest
   tsm mux new <workspace>      Create a new workspace manifest
   tsm mux edit                 Open workspace dir in $EDITOR
@@ -1633,7 +2300,7 @@ Usage:
 
 Aliases:
   palette=p  attach=a  detach=d  new=n  list=l,ls
-  rename=mv  kill=k  mux=m  version=v  help=h
+  rename=mv  kill=k  mux=m  worktree=wt  version=v  help=h
 
 Detach from a session with Ctrl+\
 `)

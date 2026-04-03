@@ -97,4 +97,16 @@ var (
 	sortStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("75")).
 			Bold(true)
+
+	// Git branch label
+	branchStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("73")) // dim cyan
+
+	// Group header in repo-grouped view
+	groupHeaderStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("75")).
+				Bold(true)
+
+	groupHeaderDimStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("241"))
 )

@@ -21,6 +21,10 @@ import (
 var kittyCtrlBackslash = []byte("\x1b[92;5u")
 var kittyCtrlBackslashExt = []byte("\x1b[92;5:")
 
+// Ctrl+] (0x1D) opens the session picker.
+var kittyCtrlBracket = []byte("\x1b[93;5u")
+var kittyCtrlBracketExt = []byte("\x1b[93;5:")
+
 // isDetachKey checks if the input contains the detach sequence:
 // either traditional Ctrl+\ (0x1C) or Kitty keyboard protocol encoding.
 func isDetachKey(data []byte) bool {
@@ -31,6 +35,25 @@ func isDetachKey(data []byte) bool {
 	}
 	return bytes.Contains(data, kittyCtrlBackslash) ||
 		bytes.Contains(data, kittyCtrlBackslashExt)
+}
+
+// isPickerKey checks if the input contains the picker sequence:
+// Ctrl+] (0x1D) or Kitty keyboard protocol encoding.
+func isPickerKey(data []byte) bool {
+	for _, b := range data {
+		if b == 0x1D {
+			return true
+		}
+	}
+	return bytes.Contains(data, kittyCtrlBracket) ||
+		bytes.Contains(data, kittyCtrlBracketExt)
+}
+
+// PickerRequestError is returned by Attach when the user requests the session picker.
+type PickerRequestError struct{}
+
+func (e *PickerRequestError) Error() string {
+	return "session picker requested"
 }
 
 // Terminal reset sequences sent before attach and on detach.
@@ -122,12 +145,18 @@ func Attach(cfg Config, name string) error {
 	}()
 
 	// Relay stdin → server input.
+	var pickerErr atomic.Pointer[PickerRequestError]
 	go func() {
 		defer closeDone()
 		buf := make([]byte, 4096)
 		for {
 			n, err := os.Stdin.Read(buf)
 			if n > 0 {
+				if isPickerKey(buf[:n]) {
+					pickerErr.Store(&PickerRequestError{})
+					SendMessage(conn, TagDetach, nil)
+					return
+				}
 				if isDetachKey(buf[:n]) {
 					SendMessage(conn, TagDetach, nil)
 					return
@@ -158,6 +187,9 @@ func Attach(cfg Config, name string) error {
 	conn.Close() // unblock any pending I/O on relay goroutines
 	if se := switchErr.Load(); se != nil {
 		return se
+	}
+	if pe := pickerErr.Load(); pe != nil {
+		return pe
 	}
 	return nil
 }

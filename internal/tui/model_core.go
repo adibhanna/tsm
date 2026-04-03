@@ -43,6 +43,7 @@ const (
 	sortByPID
 	sortByMemory
 	sortByUptime
+	sortByRepo
 	sortModeCount
 )
 
@@ -58,8 +59,19 @@ func (s sortMode) label() string {
 		return "memory"
 	case sortByUptime:
 		return "uptime"
+	case sortByRepo:
+		return "repo"
 	}
 	return ""
+}
+
+// listEntry represents a row in the grouped session list.
+type listEntry struct {
+	IsHeader  bool
+	GroupName string
+	Count     int     // number of sessions in group (only for headers)
+	Collapsed bool    // whether this group is collapsed
+	Session   Session // only valid when !IsHeader
 }
 
 // Messages
@@ -232,6 +244,14 @@ type Model struct {
 	visibleMetrics    listMetrics
 	allMetrics        listMetrics
 	allMetricsDirty   bool
+
+	// Grouped view state
+	collapsed         map[string]bool // repo name → collapsed
+	entriesCache      []listEntry
+	entriesCacheDirty bool
+
+	currentSession      string // session name we're inside ($TSM_SESSION)
+	initialCursorPlaced bool   // true after first cursor placement
 }
 
 type listMetrics struct {
@@ -248,9 +268,12 @@ func initialModel() Model {
 		options:           normed,
 		normalizedOpts:    normed,
 		selected:          make(map[string]bool),
+		collapsed:         make(map[string]bool),
+		sortMode:          sortByRepo,
 		sortAsc:           true,
 		visibleCacheDirty: true,
 		allMetricsDirty:   true,
+		entriesCacheDirty: true,
 	}
 }
 
@@ -260,6 +283,7 @@ func NewModel(opts ...Options) Model {
 		normed := NormalizeOptions(opts[0])
 		m.options = normed
 		m.normalizedOpts = normed
+		m.currentSession = opts[0].CurrentSession
 	}
 	return m
 }
@@ -306,10 +330,12 @@ func (m *Model) visibleSessions() []Session {
 func (m *Model) markSessionsChanged() {
 	m.visibleCacheDirty = true
 	m.allMetricsDirty = true
+	m.entriesCacheDirty = true
 }
 
 func (m *Model) markVisibleChanged() {
 	m.visibleCacheDirty = true
+	m.entriesCacheDirty = true
 }
 
 func (m *Model) allSessionMetrics() listMetrics {
@@ -321,15 +347,28 @@ func (m *Model) allSessionMetrics() listMetrics {
 }
 
 func (m *Model) computeVisibleSessions() []Session {
+	// Start with all sessions, optionally restricted to a repo.
+	source := m.sessions
+	if m.normalizedOpts.FilterRepo != "" {
+		source = nil
+		for _, s := range m.sessions {
+			if s.GitRepoName == m.normalizedOpts.FilterRepo {
+				source = append(source, s)
+			}
+		}
+	}
+
 	var filtered []Session
 	if m.filterText == "" {
-		filtered = make([]Session, len(m.sessions))
-		copy(filtered, m.sessions)
+		filtered = make([]Session, len(source))
+		copy(filtered, source)
 	} else {
 		lower := strings.ToLower(m.filterText)
-		for _, s := range m.sessions {
+		for _, s := range source {
 			if strings.Contains(strings.ToLower(s.Name), lower) ||
-				strings.Contains(strings.ToLower(s.StartedIn), lower) {
+				strings.Contains(strings.ToLower(s.StartedIn), lower) ||
+				strings.Contains(strings.ToLower(s.GitBranchName), lower) ||
+				strings.Contains(strings.ToLower(s.GitRepoName), lower) {
 				filtered = append(filtered, s)
 			}
 		}
@@ -373,6 +412,21 @@ func (m *Model) computeVisibleSessions() []Session {
 				return dir * (a.Uptime - b.Uptime)
 			}
 			return cmp.Compare(a.Name, b.Name)
+		})
+	case sortByRepo:
+		slices.SortFunc(filtered, func(a, b Session) int {
+			ar, br := a.GitRepoName, b.GitRepoName
+			if ar != br {
+				// Sessions without a repo sort to the end.
+				if ar == "" {
+					return 1
+				}
+				if br == "" {
+					return -1
+				}
+				return dir * cmp.Compare(ar, br)
+			}
+			return dir * cmp.Compare(a.Name, b.Name)
 		})
 	}
 
@@ -520,6 +574,18 @@ func (m Model) listContentHeight(helpLines int) int {
 
 // clampCursor ensures cursor and listOffset are valid for the visible list.
 func (m *Model) clampCursor() {
+	if m.isGroupedMode() {
+		entries := m.visibleEntries()
+		if m.cursor >= len(entries) {
+			m.cursor = max(0, len(entries)-1)
+		}
+		// Skip to nearest non-header if landed on one.
+		m.skipHeaderForward(entries)
+		if m.listOffset > m.cursor {
+			m.listOffset = m.cursor
+		}
+		return
+	}
 	visible := m.visibleSessions()
 	if m.cursor >= len(visible) {
 		m.cursor = max(0, len(visible)-1)
@@ -527,6 +593,169 @@ func (m *Model) clampCursor() {
 	if m.listOffset > m.cursor {
 		m.listOffset = m.cursor
 	}
+}
+
+func (m Model) isGroupedMode() bool {
+	return m.sortMode == sortByRepo && !m.isSimplified()
+}
+
+// visibleEntries returns the flat list of entries (headers + sessions) for grouped view.
+func (m *Model) visibleEntries() []listEntry {
+	if !m.entriesCacheDirty {
+		return m.entriesCache
+	}
+	sessions := m.visibleSessions()
+	if !m.isGroupedMode() {
+		entries := make([]listEntry, len(sessions))
+		for i, s := range sessions {
+			entries[i] = listEntry{Session: s}
+		}
+		m.entriesCache = entries
+		m.entriesCacheDirty = false
+		return entries
+	}
+	m.entriesCache = groupByRepo(sessions, m.collapsed)
+	m.entriesCacheDirty = false
+	return m.entriesCache
+}
+
+// groupByRepo groups sessions by git repo name with header entries.
+func groupByRepo(sessions []Session, collapsed map[string]bool) []listEntry {
+	// Collect groups preserving sort order.
+	type group struct {
+		name     string
+		sessions []Session
+	}
+	var groups []group
+	groupIdx := map[string]int{}
+
+	var ungrouped []Session
+	for _, s := range sessions {
+		repo := s.GitRepoName
+		if repo == "" {
+			ungrouped = append(ungrouped, s)
+			continue
+		}
+		if idx, ok := groupIdx[repo]; ok {
+			groups[idx].sessions = append(groups[idx].sessions, s)
+		} else {
+			groupIdx[repo] = len(groups)
+			groups = append(groups, group{name: repo, sessions: []Session{s}})
+		}
+	}
+
+	var entries []listEntry
+	for _, g := range groups {
+		if len(g.sessions) == 1 {
+			// Single session — show flat, no header.
+			entries = append(entries, listEntry{Session: g.sessions[0]})
+			continue
+		}
+		isCollapsed := collapsed[g.name]
+		entries = append(entries, listEntry{
+			IsHeader:  true,
+			GroupName: g.name,
+			Count:     len(g.sessions),
+			Collapsed: isCollapsed,
+		})
+		if !isCollapsed {
+			for _, s := range g.sessions {
+				entries = append(entries, listEntry{Session: s})
+			}
+		}
+	}
+	for _, s := range ungrouped {
+		entries = append(entries, listEntry{Session: s})
+	}
+	return entries
+}
+
+// skipHeaderForward moves cursor past any header entry.
+func (m *Model) skipHeaderForward(entries []listEntry) {
+	for m.cursor < len(entries) && entries[m.cursor].IsHeader {
+		m.cursor++
+	}
+	if m.cursor >= len(entries) && len(entries) > 0 {
+		// Went past end, try backwards.
+		m.cursor = len(entries) - 1
+		for m.cursor > 0 && entries[m.cursor].IsHeader {
+			m.cursor--
+		}
+	}
+}
+
+// entrySession returns the session at the cursor position in grouped mode,
+// falling back to the flat visible list.
+func (m *Model) cursorSession() (Session, bool) {
+	if m.isGroupedMode() {
+		entries := m.visibleEntries()
+		if m.cursor < len(entries) && !entries[m.cursor].IsHeader {
+			return entries[m.cursor].Session, true
+		}
+		return Session{}, false
+	}
+	visible := m.visibleSessions()
+	if m.cursor < len(visible) {
+		return visible[m.cursor], true
+	}
+	return Session{}, false
+}
+
+// cursorGroupName returns the group name at the cursor (header or child).
+func (m *Model) cursorGroupName() string {
+	if !m.isGroupedMode() {
+		return ""
+	}
+	entries := m.visibleEntries()
+	if m.cursor >= len(entries) {
+		return ""
+	}
+	if entries[m.cursor].IsHeader {
+		return entries[m.cursor].GroupName
+	}
+	// Walk backwards to find the header.
+	for i := m.cursor - 1; i >= 0; i-- {
+		if entries[i].IsHeader {
+			return entries[i].GroupName
+		}
+	}
+	return ""
+}
+
+// placeCursorOnSession moves the cursor to the entry matching the given session name.
+func (m *Model) placeCursorOnSession(name string) {
+	if m.isGroupedMode() {
+		entries := m.visibleEntries()
+		for i, e := range entries {
+			if !e.IsHeader && e.Session.Name == name {
+				m.cursor = i
+				m.ensureVisible()
+				return
+			}
+		}
+	} else {
+		for i, s := range m.visibleSessions() {
+			if s.Name == name {
+				m.cursor = i
+				m.ensureVisible()
+				return
+			}
+		}
+	}
+}
+
+// visibleCount returns the number of selectable (non-header) entries.
+func (m *Model) visibleCount() int {
+	if m.isGroupedMode() {
+		count := 0
+		for _, e := range m.visibleEntries() {
+			if !e.IsHeader {
+				count++
+			}
+		}
+		return count
+	}
+	return len(m.visibleSessions())
 }
 
 func (m Model) Init() tea.Cmd {
@@ -539,9 +768,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		visible := m.visibleSessions()
-		if !m.isSimplified() && m.cursor < len(visible) {
-			return m, m.previewCmd()
+		if !m.isSimplified() {
+			if _, ok := m.cursorSession(); ok {
+				return m, m.previewCmd()
+			}
 		}
 
 	case sessionsMsg:
@@ -575,10 +805,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.clampCursor()
+		// On first load, place cursor on the current session.
+		if !m.initialCursorPlaced && m.currentSession != "" {
+			m.initialCursorPlaced = true
+			m.placeCursorOnSession(m.currentSession)
+		}
 		cmds := []tea.Cmd{fetchProcessInfoCmd(m.sessions)}
-		visible := m.visibleSessions()
-		if !m.isSimplified() && len(visible) > 0 && m.cursor < len(visible) {
-			if visible[m.cursor].AgentKind == "" {
+		if !m.isSimplified() {
+			if s, ok := m.cursorSession(); ok && s.AgentKind == "" {
 				cmds = append(cmds, m.previewCmd())
 			}
 		} else {
@@ -605,8 +839,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case previewMsg:
-		visible := m.visibleSessions()
-		if m.cursor < len(visible) && visible[m.cursor].Name == msg.name {
+		if s, ok := m.cursorSession(); ok && s.Name == msg.name {
 			m.preview = msg.content
 		}
 
@@ -693,11 +926,10 @@ func (m *Model) previewCmd() tea.Cmd {
 	if m.isSimplified() {
 		return nil
 	}
-	visible := m.visibleSessions()
-	if m.cursor >= len(visible) {
-		return nil
+	if s, ok := m.cursorSession(); ok {
+		return fetchPreviewCmd(s.Name, m.mainContentHeight(1))
 	}
-	return fetchPreviewCmd(visible[m.cursor].Name, m.mainContentHeight(1))
+	return nil
 }
 
 func (m *Model) killTargets() []string {
@@ -716,9 +948,8 @@ func (m *Model) actionTargets() []string {
 		}
 		return names
 	}
-	visible := m.visibleSessions()
-	if m.cursor < len(visible) {
-		return []string{visible[m.cursor].Name}
+	if s, ok := m.cursorSession(); ok {
+		return []string{s.Name}
 	}
 	return nil
 }

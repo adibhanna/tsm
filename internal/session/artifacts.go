@@ -17,6 +17,7 @@ func RemoveSessionArtifacts(cfg Config, sessionName string) error {
 	paths := []string{
 		daemonBuildInfoPath(cfg, sessionName),
 		ClaudeStatuslinePath(cfg, sessionName),
+		GitMetaPath(cfg, sessionName),
 	}
 	for _, path := range paths {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
@@ -52,6 +53,7 @@ func RenameSessionArtifacts(cfg Config, oldName, newName string) error {
 	pairs := [][2]string{
 		{daemonBuildInfoPath(cfg, oldName), daemonBuildInfoPath(cfg, newName)},
 		{ClaudeStatuslinePath(cfg, oldName), ClaudeStatuslinePath(cfg, newName)},
+		{GitMetaPath(cfg, oldName), GitMetaPath(cfg, newName)},
 	}
 	for _, pair := range pairs {
 		if err := renameOptionalFile(pair[0], pair[1]); err != nil {
@@ -82,6 +84,7 @@ func ListSessionArtifacts(cfg Config) ([]SessionArtifact, error) {
 	sources := []source{
 		{kind: "daemon-build", dir: daemonBuildDir},
 		{kind: "claude-statusline", dir: claudeStatuslineDir},
+		{kind: "git-meta", dir: gitMetaDir},
 	}
 
 	var artifacts []SessionArtifact

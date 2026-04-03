@@ -62,7 +62,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case m.isMoveUpKey(msg):
-		if m.cursor > 0 {
+		if m.isGroupedMode() {
+			if m.cursor > 0 {
+				m.cursor--
+				m.previewScrollX = 0
+				m.ensureVisible()
+				return m, m.previewCmd()
+			}
+		} else if m.cursor > 0 {
 			m.cursor--
 			m.previewScrollX = 0
 			m.ensureVisible()
@@ -70,7 +77,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case m.isMoveDownKey(msg):
-		if m.cursor < len(visible)-1 {
+		if m.isGroupedMode() {
+			entries := m.visibleEntries()
+			if m.cursor < len(entries)-1 {
+				m.cursor++
+				m.previewScrollX = 0
+				m.ensureVisible()
+				return m, m.previewCmd()
+			}
+		} else if m.cursor < len(visible)-1 {
 			m.cursor++
 			m.previewScrollX = 0
 			m.ensureVisible()
@@ -78,6 +93,22 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case m.isMoveLeftKey(msg):
+		// In grouped mode, left collapses the current group.
+		if m.isGroupedMode() {
+			if group := m.cursorGroupName(); group != "" && !m.collapsed[group] {
+				// Find the header index for this group so cursor lands on it.
+				entries := m.visibleEntries()
+				for i, e := range entries {
+					if e.IsHeader && e.GroupName == group {
+						m.cursor = i
+						break
+					}
+				}
+				m.collapsed[group] = true
+				m.entriesCacheDirty = true
+				return m, nil
+			}
+		}
 		if m.previewScrollX > 0 {
 			m.previewScrollX -= 4
 			if m.previewScrollX < 0 {
@@ -86,6 +117,18 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case m.isMoveRightKey(msg):
+		// In grouped mode, right expands a collapsed group.
+		if m.isGroupedMode() {
+			entries := m.visibleEntries()
+			if m.cursor < len(entries) && entries[m.cursor].IsHeader && entries[m.cursor].Collapsed {
+				group := entries[m.cursor].GroupName
+				m.collapsed[group] = false
+				m.entriesCacheDirty = true
+				// Move cursor to first child.
+				m.cursor++
+				return m, m.previewCmd()
+			}
+		}
 		maxW := previewMaxWidth(m.preview)
 		limit := maxW - m.previewInnerWidth()
 		if limit < 0 {
@@ -98,18 +141,33 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case m.isToggleSelectKey(msg):
-		if m.cursor < len(visible) {
-			name := visible[m.cursor].Name
-			if m.selected[name] {
-				delete(m.selected, name)
+		if s, ok := m.cursorSession(); ok {
+			if m.selected[s.Name] {
+				delete(m.selected, s.Name)
 			} else {
-				m.selected[name] = true
+				m.selected[s.Name] = true
 			}
 		}
 
 	case m.isAttachKey(msg):
-		if m.cursor < len(visible) {
-			m.attachTarget = visible[m.cursor].Name
+		// Enter on a header toggles collapse.
+		if m.isGroupedMode() {
+			entries := m.visibleEntries()
+			if m.cursor < len(entries) && entries[m.cursor].IsHeader {
+				group := entries[m.cursor].GroupName
+				if m.collapsed[group] {
+					m.collapsed[group] = false
+					m.entriesCacheDirty = true
+					m.cursor++ // move to first child
+				} else {
+					m.collapsed[group] = true
+					m.entriesCacheDirty = true
+				}
+				return m, nil
+			}
+		}
+		if s, ok := m.cursorSession(); ok {
+			m.attachTarget = s.Name
 			return m, tea.Quit
 		}
 
@@ -132,9 +190,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Batch(cmds...)
 		case m.isCopyKey(msg):
-			if m.cursor < len(visible) {
-				name := visible[m.cursor].Name
-				text := fmt.Sprintf("tsm attach %s", name)
+			if s, ok := m.cursorSession(); ok {
+				text := fmt.Sprintf("tsm attach %s", s.Name)
 				if err := engine.CopyToClipboard(text); err != nil {
 					m.status = fmt.Sprintf("Copy failed: %v", err)
 					m.addLog(confirmStyle.Render(fmt.Sprintf("  ✗ Copy failed: %v", err)))
@@ -148,10 +205,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.state = stateNewSession
 			m.newSessionName = ""
 		case m.isRenameKey(msg):
-			if m.cursor < len(visible) {
+			if s, ok := m.cursorSession(); ok {
 				m.state = stateRenameSession
-				m.renameOldName = visible[m.cursor].Name
-				m.renameNewName = visible[m.cursor].Name
+				m.renameOldName = s.Name
+				m.renameNewName = s.Name
 			}
 		case m.isRefreshKey(msg):
 			m.refreshing = true
