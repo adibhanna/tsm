@@ -63,11 +63,13 @@ func ParseKeymap(raw string) (Keymap, error) {
 }
 
 type Options struct {
-	Mode        Mode
-	Keymap      Keymap
-	ShowHelp    bool
-	ShowHelpSet bool
-	Bindings    Bindings
+	Mode           Mode
+	Keymap         Keymap
+	ShowHelp       bool
+	ShowHelpSet    bool
+	Bindings       Bindings
+	CurrentSession string // name of the session we're inside (from $TSM_SESSION)
+	FilterRepo     string // if set, only show sessions for this git repo
 }
 
 func NormalizeOptions(opts Options) Options {

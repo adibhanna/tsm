@@ -165,6 +165,12 @@ func StartDaemon(name string, shellCmd []string) error {
 
 // SpawnDaemon starts a daemon in a new process (re-exec with --daemon flag).
 func SpawnDaemon(name string, shellCmd []string) error {
+	return SpawnDaemonInDir(name, shellCmd, "")
+}
+
+// SpawnDaemonInDir spawns a new daemon process. If dir is non-empty, the daemon
+// starts in that directory instead of the current working directory.
+func SpawnDaemonInDir(name string, shellCmd []string, dir string) error {
 	cfg := DefaultConfig()
 
 	// Check if session already exists.
@@ -190,6 +196,9 @@ func SpawnDaemon(name string, shellCmd []string) error {
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil
+	if dir != "" {
+		cmd.Dir = dir
+	}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("spawn daemon: %w", err)

@@ -26,12 +26,12 @@ func TestSuggestSessionNameUsesCurrentDirectory(t *testing.T) {
 	t.Chdir(workdir)
 
 	cfg := session.DefaultConfig()
-	name, err := suggestSessionName(cfg, nil)
+	result, err := suggestSessionName(cfg, nil)
 	if err != nil {
 		t.Fatalf("suggestSessionName: %v", err)
 	}
-	if name != "demo" {
-		t.Fatalf("name = %q, want demo", name)
+	if result.Name != "demo" {
+		t.Fatalf("name = %q, want demo", result.Name)
 	}
 }
 
@@ -45,12 +45,12 @@ func TestSuggestSessionNameAddsSuffixForCollisions(t *testing.T) {
 
 	cfg := session.DefaultConfig()
 	sessions := []session.Session{{Name: "demo"}, {Name: "demo-2"}}
-	name, err := suggestSessionName(cfg, sessions)
+	result, err := suggestSessionName(cfg, sessions)
 	if err != nil {
 		t.Fatalf("suggestSessionName: %v", err)
 	}
-	if name != "demo-3" {
-		t.Fatalf("name = %q, want demo-3", name)
+	if result.Name != "demo-3" {
+		t.Fatalf("name = %q, want demo-3", result.Name)
 	}
 }
 
@@ -63,15 +63,15 @@ func TestSuggestSessionNameSkipsExistingSocketPathConflicts(t *testing.T) {
 	t.Chdir(workdir)
 
 	cfg := session.Config{SocketDir: dir}
-	name, err := suggestSessionName(cfg, nil)
+	result, err := suggestSessionName(cfg, nil)
 	if err != nil {
 		t.Fatalf("suggestSessionName: %v", err)
 	}
-	if name == "demo" {
-		t.Fatalf("name = %q, want conflict-avoiding variant", name)
+	if result.Name == "demo" {
+		t.Fatalf("name = %q, want conflict-avoiding variant", result.Name)
 	}
-	if !strings.HasSuffix(name, "-2") {
-		t.Fatalf("name = %q, want suffix -2", name)
+	if !strings.HasSuffix(result.Name, "-2") {
+		t.Fatalf("name = %q, want suffix -2", result.Name)
 	}
 }
 

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"unicode/utf8"
 
@@ -138,8 +139,16 @@ func (m Model) fullView() tea.View {
 	// --- Preview pane ---
 	pw := m.previewInnerWidth()
 	selected := Session{}
-	if m.cursor < len(visible) {
-		selected = visible[m.cursor]
+	onHeader := false
+	headerName := ""
+	if s, ok := m.cursorSession(); ok {
+		selected = s
+	} else if m.isGroupedMode() {
+		entries := m.visibleEntries()
+		if m.cursor < len(entries) && entries[m.cursor].IsHeader {
+			onHeader = true
+			headerName = entries[m.cursor].GroupName
+		}
 	}
 	previewContent := ""
 	previewTitleLeft := " Preview "
@@ -156,12 +165,23 @@ func (m Model) fullView() tea.View {
 			lines = append(lines, prefix+name)
 		}
 		previewContent = clampLines(strings.Join(lines, "\n"), ch)
+	} else if onHeader {
+		previewTitleLeft = fmt.Sprintf(" %s ", headerName)
+		previewTitleRight = ""
+		previewContent = clampLines(m.renderGroupPreview(headerName, pw), ch)
 	} else if selected.AgentKind != "" {
 		previewContent = m.renderAgentPreview(selected, pw, ch)
+	} else if selected.Name != "" && selected.Name == os.Getenv("TSM_SESSION") {
+		// Current session — show info instead of terminal preview to avoid infinite mirror.
+		var lines []string
+		lines = append(lines, agentStateStyle.Render("(current session)"))
+		lines = append(lines, "")
+		lines = appendSection(lines, "overview", renderOverviewRows(selected))
+		previewContent = clampLines(strings.Join(lines, "\n"), ch)
 	} else {
 		previewContent = clampLines(engine.ScrollPreview(m.preview, m.previewScrollX, pw), ch)
 	}
-	if m.state != stateMuxOpen {
+	if m.state != stateMuxOpen && !onHeader {
 		if selected.Name != "" {
 			previewTitleLeft = fmt.Sprintf(" %s ", selected.Name)
 			previewTitleRight = fmt.Sprintf(" 📂 %s ", selected.DisplayDir())
@@ -225,9 +245,8 @@ func (m Model) simplifiedView() tea.View {
 
 	rowsHeight := m.simplifiedRowsHeight()
 	selected := Session{}
-	visible := m.visibleSessions()
-	if m.cursor < len(visible) {
-		selected = visible[m.cursor]
+	if s, ok := m.cursorSession(); ok {
+		selected = s
 	}
 	agentLine := m.renderAgentStatusLine(selected, innerWidth)
 	contentHeight := rowsHeight + 1
@@ -450,6 +469,10 @@ func (m Model) renderLog() string {
 }
 
 func (m *Model) renderList(maxRows int) string {
+	if m.isGroupedMode() {
+		return m.renderGroupedList(maxRows)
+	}
+
 	visible := m.visibleSessions()
 	if len(visible) == 0 {
 		if m.filterText != "" {
@@ -472,60 +495,7 @@ func (m *Model) renderList(maxRows int) string {
 		isCursor := i == m.cursor
 		isSelected := m.selected[s.Name]
 
-		var indicator string
-		switch {
-		case isCursor && isSelected:
-			indicator = selectedStyle.Render("▸●")
-		case isCursor:
-			indicator = selectedStyle.Render("▸ ")
-		case isSelected:
-			indicator = selectedStyle.Render(" ●")
-		default:
-			indicator = "  "
-		}
-
-		var clientInd string
-		if s.Clients > 0 {
-			clientInd = activeClientStyle.Render(padLeft(fmt.Sprintf("●%d", s.Clients), metrics.clientW))
-		} else {
-			clientInd = inactiveClientStyle.Render(padLeft("○0", metrics.clientW))
-		}
-
-		pidStr := pidStyle.Render(padLeft(s.PID, metrics.pidW))
-
-		memLabel := "-"
-		if s.Memory > 0 {
-			memLabel = engine.FormatBytes(s.Memory)
-		}
-		memStr := memStyle.Render(padLeft(memLabel, metrics.memW))
-
-		uptimeLabel := "-"
-		if s.Uptime > 0 {
-			uptimeLabel = engine.FormatUptime(s.Uptime)
-		}
-		uptimeStr := uptimeStyle.Render(padLeft(uptimeLabel, metrics.uptimeW))
-
-		// lw = indicator(2) + name + " " + pid + " " + mem + " " + uptime + " " + client
-		nameWidth := lw - 6 - metrics.pidW - metrics.memW - metrics.uptimeW - metrics.clientW
-		if nameWidth < 10 {
-			nameWidth = 10
-		}
-		name := truncate(s.Name, nameWidth)
-		paddedName := padRight(name, nameWidth)
-
-		style := normalStyle
-		if isCursor || isSelected {
-			style = selectedStyle
-		}
-
-		var styledName string
-		if m.filterText != "" {
-			styledName = highlightMatch(paddedName, m.filterText, style, filterMatchStyle)
-		} else {
-			styledName = style.Render(paddedName)
-		}
-
-		row := fmt.Sprintf("%s%s %s %s %s %s", indicator, styledName, pidStr, memStr, uptimeStr, clientInd)
+		row := m.renderSessionRow(s, isCursor, isSelected, lw, metrics, "")
 		b.WriteString(row)
 		if i < end-1 {
 			b.WriteString("\n")
@@ -533,6 +503,137 @@ func (m *Model) renderList(maxRows int) string {
 	}
 
 	return b.String()
+}
+
+func (m *Model) renderGroupedList(maxRows int) string {
+	entries := m.visibleEntries()
+	if len(entries) == 0 {
+		if m.filterText != "" {
+			return normalStyle.Render("  No matches. Esc to clear filter.")
+		}
+		return normalStyle.Render("  No sessions found. Press " + m.refreshKeyLabel() + " to refresh.")
+	}
+
+	lw := m.listInnerWidth()
+	metrics := m.visibleMetrics
+	var b strings.Builder
+
+	end := m.listOffset + maxRows
+	if end > len(entries) {
+		end = len(entries)
+	}
+
+	for i := m.listOffset; i < end; i++ {
+		e := entries[i]
+		if e.IsHeader {
+			chevron := "▾"
+			if e.Collapsed {
+				chevron = "▸"
+			}
+			header := fmt.Sprintf("  %s %s (%d)", chevron, e.GroupName, e.Count)
+			if len(header) < lw {
+				header = padRight(header, lw)
+			}
+			if i == m.cursor {
+				b.WriteString(selectedStyle.Render(header))
+			} else {
+				b.WriteString(groupHeaderStyle.Render(header))
+			}
+		} else {
+			isCursor := i == m.cursor
+			isSelected := m.selected[e.Session.Name]
+			row := m.renderSessionRow(e.Session, isCursor, isSelected, lw, metrics, "  ")
+			b.WriteString(row)
+		}
+		if i < end-1 {
+			b.WriteString("\n")
+		}
+	}
+
+	return b.String()
+}
+
+func (m *Model) renderSessionRow(s Session, isCursor, isSelected bool, lw int, metrics listMetrics, indent string) string {
+	var indicator string
+	switch {
+	case isCursor && isSelected:
+		indicator = selectedStyle.Render("▸●")
+	case isCursor:
+		indicator = selectedStyle.Render("▸ ")
+	case isSelected:
+		indicator = selectedStyle.Render(" ●")
+	default:
+		indicator = "  "
+	}
+
+	var clientInd string
+	if s.Clients > 0 {
+		clientInd = activeClientStyle.Render(padLeft(fmt.Sprintf("●%d", s.Clients), metrics.clientW))
+	} else {
+		clientInd = inactiveClientStyle.Render(padLeft("○0", metrics.clientW))
+	}
+
+	pidStr := pidStyle.Render(padLeft(s.PID, metrics.pidW))
+
+	memLabel := "-"
+	if s.Memory > 0 {
+		memLabel = engine.FormatBytes(s.Memory)
+	}
+	memStr := memStyle.Render(padLeft(memLabel, metrics.memW))
+
+	uptimeLabel := "-"
+	if s.Uptime > 0 {
+		uptimeLabel = engine.FormatUptime(s.Uptime)
+	}
+	uptimeStr := uptimeStyle.Render(padLeft(uptimeLabel, metrics.uptimeW))
+
+	// lw = indicator(2) + indent + name + " " + pid + " " + mem + " " + uptime + " " + client
+	nameWidth := lw - 6 - len(indent) - metrics.pidW - metrics.memW - metrics.uptimeW - metrics.clientW
+	if nameWidth < 10 {
+		nameWidth = 10
+	}
+
+	displayName := s.Name
+	// For non-worktree git sessions, append branch as a dim suffix.
+	branchSuffix := ""
+	if s.GitBranchName != "" && !s.GitIsWorktree && !strings.Contains(s.Name, "@") {
+		branchSuffix = " " + s.GitBranchName
+	}
+
+	name := truncate(displayName, nameWidth)
+	// Calculate remaining space for branch suffix.
+	remaining := nameWidth - runewidth.StringWidth(name)
+	if branchSuffix != "" && remaining > 3 {
+		branchSuffix = truncate(branchSuffix, remaining)
+	} else {
+		branchSuffix = ""
+	}
+
+	paddedName := padRight(name+branchSuffix, nameWidth)
+
+	style := normalStyle
+	if isCursor || isSelected {
+		style = selectedStyle
+	}
+
+	var styledName string
+	if branchSuffix != "" {
+		// Render name and branch suffix separately for different styling.
+		nameOnly := padRight(name, nameWidth-runewidth.StringWidth(branchSuffix))
+		if m.filterText != "" {
+			styledName = highlightMatch(nameOnly, m.filterText, style, filterMatchStyle) + branchStyle.Render(branchSuffix)
+		} else {
+			styledName = style.Render(nameOnly) + branchStyle.Render(branchSuffix)
+		}
+	} else {
+		if m.filterText != "" {
+			styledName = highlightMatch(paddedName, m.filterText, style, filterMatchStyle)
+		} else {
+			styledName = style.Render(paddedName)
+		}
+	}
+
+	return fmt.Sprintf("%s%s%s %s %s %s %s", indent, indicator, styledName, pidStr, memStr, uptimeStr, clientInd)
 }
 
 func (m *Model) renderPaletteList(maxRows, innerWidth int) string {
@@ -586,11 +687,36 @@ func (m *Model) renderPaletteList(maxRows, innerWidth int) string {
 		if isCursor || isSelected {
 			style = selectedStyle
 		}
-		name := truncate(s.Name, nameWidth)
-		paddedName := padRight(name, nameWidth)
-		styledName := style.Render(paddedName)
-		if m.filterText != "" {
-			styledName = highlightMatch(paddedName, m.filterText, style, filterMatchStyle)
+
+		displayName := s.Name
+		branchSuffix := ""
+		if s.GitBranchName != "" && !s.GitIsWorktree && !strings.Contains(s.Name, "@") {
+			branchSuffix = " " + s.GitBranchName
+		}
+
+		name := truncate(displayName, nameWidth)
+		remaining := nameWidth - runewidth.StringWidth(name)
+		if branchSuffix != "" && remaining > 3 {
+			branchSuffix = truncate(branchSuffix, remaining)
+		} else {
+			branchSuffix = ""
+		}
+
+		paddedName := padRight(name+branchSuffix, nameWidth)
+
+		var styledName string
+		if branchSuffix != "" {
+			nameOnly := padRight(name, nameWidth-runewidth.StringWidth(branchSuffix))
+			if m.filterText != "" {
+				styledName = highlightMatch(nameOnly, m.filterText, style, filterMatchStyle) + branchStyle.Render(branchSuffix)
+			} else {
+				styledName = style.Render(nameOnly) + branchStyle.Render(branchSuffix)
+			}
+		} else {
+			styledName = style.Render(paddedName)
+			if m.filterText != "" {
+				styledName = highlightMatch(paddedName, m.filterText, style, filterMatchStyle)
+			}
 		}
 
 		row := fmt.Sprintf("%s%s %s %s", indicator, styledName, uptimeStr, clientLabel)
@@ -708,6 +834,47 @@ func (m Model) renderSimplifiedHelp() string {
 	return strings.Join(lines, "\n")
 }
 
+func (m *Model) renderGroupPreview(groupName string, width int) string {
+	var lines []string
+	lines = append(lines, agentStateStyle.Render("sessions"))
+
+	// Find all sessions in this group.
+	for _, s := range m.sessions {
+		if s.GitRepoName != groupName {
+			continue
+		}
+		branch := s.GitBranchName
+		if branch == "" {
+			branch = "-"
+		}
+		status := "idle"
+		if s.Clients > 0 {
+			status = fmt.Sprintf("attached (%d)", s.Clients)
+		}
+		if s.AgentKind != "" {
+			state := s.AgentState
+			if state == "" {
+				state = "running"
+			}
+			status = s.AgentKind + " " + state
+		}
+		line := fmt.Sprintf("  %-14s %s", branch, agentMetaStyle.Render(status))
+		lines = append(lines, line)
+	}
+
+	// Show repo root if available.
+	for _, s := range m.sessions {
+		if s.GitRepoName == groupName && s.GitRepoRoot != "" {
+			lines = append(lines, "")
+			lines = append(lines, agentStateStyle.Render("repo"))
+			lines = append(lines, agentMetaStyle.Render("  "+s.GitRepoRoot))
+			break
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
 func renderOverviewRows(s Session) []string {
 	rows := []string{}
 	if model := engine.DisplayAgentModel(s.AgentKind, s.AgentModel); model != "" {
@@ -716,8 +883,15 @@ func renderOverviewRows(s Session) []string {
 	if s.AgentVersion != "" {
 		rows = append(rows, "version: "+s.AgentVersion)
 	}
-	if s.AgentBranch != "" {
-		rows = append(rows, "branch: "+s.AgentBranch)
+	branch := s.AgentBranch
+	if branch == "" {
+		branch = s.GitBranchName
+	}
+	if branch != "" {
+		rows = append(rows, "branch: "+branch)
+	}
+	if s.GitRepoName != "" {
+		rows = append(rows, "repo: "+s.GitRepoName)
 	}
 	if s.AgentName != "" {
 		label := "agent: " + s.AgentName
@@ -738,8 +912,12 @@ func renderOverviewRows(s Session) []string {
 	if s.AgentProjectDir != "" {
 		rows = append(rows, "project: "+s.AgentProjectDir)
 	}
-	if s.AgentWorktreePath != "" {
-		rows = append(rows, "worktree: "+s.AgentWorktreePath)
+	worktree := s.AgentWorktreePath
+	if worktree == "" && s.GitIsWorktree {
+		worktree = s.GitRepoRoot
+	}
+	if worktree != "" {
+		rows = append(rows, "worktree: "+worktree)
 	}
 	return rows
 }
