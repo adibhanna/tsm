@@ -13,7 +13,7 @@ type GitContext struct {
 	IsWorktree bool   `json:"is_worktree"` // true if cwd is a linked worktree
 	IsGitRepo  bool   `json:"is_git_repo"` // true if inside any git repo
 	RepoRoot   string `json:"repo_root"`   // absolute path to main worktree root
-	IsSplit    bool   `json:"is_split"`     // true if this is a workspace split pane session
+	IsSplit    bool   `json:"is_split"`    // true if this is a workspace split pane session
 }
 
 // DetectGitContext detects git repository context from the given directory.
