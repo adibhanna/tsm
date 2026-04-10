@@ -155,6 +155,13 @@ func (g *ghosttyTerminal) formatLocked(opts C.GhosttyFormatterTerminalOptions) [
 	return C.GoBytes(unsafe.Pointer(ptr), C.int(n))
 }
 
+func (g *ghosttyTerminal) InAltScreen() bool {
+	if g.tracker != nil {
+		return g.tracker.InAltScreen()
+	}
+	return false
+}
+
 func (g *ghosttyTerminal) Close() error {
 	g.mu.Lock()
 	defer g.mu.Unlock()

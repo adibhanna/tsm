@@ -13,6 +13,7 @@ type TerminalBackend interface {
 	Resize(rows, cols uint16) error
 	Snapshot() []byte
 	Preview() []byte
+	InAltScreen() bool
 	Close() error
 }
 
@@ -142,6 +143,12 @@ func (t *modeTracker) Resize(rows, cols uint16) error {
 
 func (t *modeTracker) Preview() []byte {
 	return nil
+}
+
+func (t *modeTracker) InAltScreen() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.altScreen
 }
 
 func (t *modeTracker) Close() error {

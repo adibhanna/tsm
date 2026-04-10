@@ -223,9 +223,13 @@ func (d *Daemon) readPTY() {
 		n, err := d.ptmx.Read(buf)
 		if n > 0 {
 			data := buf[:n]
-			d.terminal.Consume(data)
+			// Broadcast to clients before VT processing so output reaches
+			// the terminal with minimal latency. The Consume call updates
+			// internal state for Snapshot/Preview but is not on the
+			// critical path for live output.
 			d.scrollback.Write(data)
 			d.broadcast(TagOutput, data)
+			d.terminal.Consume(data)
 		}
 		if err != nil {
 			return
@@ -301,7 +305,7 @@ func (d *Daemon) handleClient(conn net.Conn) {
 
 		case TagInit:
 			// Client just connected — resize PTY, signal the foreground
-			// process group, and send Ctrl+L to force a redraw.
+			// process group, and optionally send Ctrl+L to force a redraw.
 			d.markClientAttached(conn)
 			if seq := d.terminal.Snapshot(); len(seq) > 0 {
 				d.sendMessage(conn, TagOutput, seq, ioTimeout)
@@ -315,12 +319,16 @@ func (d *Daemon) handleClient(conn net.Conn) {
 			if pgrp, err := getForegroundPgrp(d.ptmx); err == nil && pgrp > 0 {
 				syscall.Kill(-pgrp, syscall.SIGWINCH)
 			}
-			// Poke the PTY with Ctrl+L to wake up the app's event loop
-			// and force an immediate screen redraw (works in vim + shells).
-			time.Sleep(10 * time.Millisecond)
-			if _, err := d.ptmx.Write([]byte{0x0c}); err != nil {
-				d.doneOnce.Do(func() { close(d.done) })
-				return
+			// Alt-screen apps (Claude Code, vim, etc.) redraw from
+			// SIGWINCH alone. Skip Ctrl+L for them — it can trigger
+			// an expensive full re-render (e.g. long conversations in
+			// Claude Code with --continue/--resume).
+			if !d.terminal.InAltScreen() {
+				time.Sleep(10 * time.Millisecond)
+				if _, err := d.ptmx.Write([]byte{0x0c}); err != nil {
+					d.doneOnce.Do(func() { close(d.done) })
+					return
+				}
 			}
 
 		case TagInfo:
@@ -362,10 +370,12 @@ func (d *Daemon) handleClient(conn net.Conn) {
 				if pgrp, err := getForegroundPgrp(d.ptmx); err == nil && pgrp > 0 {
 					syscall.Kill(-pgrp, syscall.SIGWINCH)
 				}
-				time.Sleep(10 * time.Millisecond)
-				if _, err := d.ptmx.Write([]byte{0x0c}); err != nil {
-					d.doneOnce.Do(func() { close(d.done) })
-					return
+				if !d.terminal.InAltScreen() {
+					time.Sleep(10 * time.Millisecond)
+					if _, err := d.ptmx.Write([]byte{0x0c}); err != nil {
+						d.doneOnce.Do(func() { close(d.done) })
+						return
+					}
 				}
 			}
 

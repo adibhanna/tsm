@@ -18,4 +18,6 @@ func (s *stubTerminal) Snapshot() []byte { return nil }
 
 func (s *stubTerminal) Preview() []byte { return nil }
 
+func (s *stubTerminal) InAltScreen() bool { return false }
+
 func (s *stubTerminal) Close() error { return nil }
