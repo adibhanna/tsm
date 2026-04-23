@@ -188,33 +188,105 @@ func SpawnDaemonInDir(name string, shellCmd []string, dir string) error {
 		return fmt.Errorf("resolve executable: %w", err)
 	}
 
+	// Capture the daemon's stderr so we can surface startup failures to the
+	// caller. Without this, any error returned by StartDaemon (pty open,
+	// mkdir, env setup, ...) is silently lost and the user sees a false
+	// "Session created" when the daemon crashes immediately after binding
+	// the socket.
+	stderrFile, err := os.CreateTemp("", "tsm-daemon-stderr-*.log")
+	if err != nil {
+		return fmt.Errorf("create daemon stderr log: %w", err)
+	}
+	stderrPath := stderrFile.Name()
+	defer os.Remove(stderrPath)
+
 	args := []string{exe, "--daemon", name}
 	args = append(args, shellCmd...)
 
 	cmd := exec.Command(exe, args[1:]...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdout = nil
-	cmd.Stderr = nil
+	cmd.Stderr = stderrFile
 	cmd.Stdin = nil
 	if dir != "" {
 		cmd.Dir = dir
 	}
 
 	if err := cmd.Start(); err != nil {
+		stderrFile.Close()
 		return fmt.Errorf("spawn daemon: %w", err)
 	}
+	// The child inherits the fd; we can close our handle.
+	stderrFile.Close()
 
-	// Detach — don't wait for the daemon process.
-	cmd.Process.Release()
+	// Reap the daemon in a goroutine so an early exit is observable via
+	// waitCh. If the daemon outlives this process, the goroutine is torn
+	// down with us and the kernel reparents the daemon to init.
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
 
-	// Wait briefly for the socket to appear.
-	for i := 0; i < 20; i++ {
-		time.Sleep(50 * time.Millisecond)
+	const (
+		totalWait    = 3 * time.Second
+		pollInterval = 50 * time.Millisecond
+	)
+	deadline := time.Now().Add(totalWait)
+
+	for {
+		// A live, responsive daemon is the only success signal. IsSocket
+		// returns true as soon as net.Listen succeeds, even if the daemon
+		// crashes a millisecond later and its deferred cleanup removes the
+		// file. ProbeSession actually round-trips a message.
 		if IsSocket(sockPath) {
-			return nil
+			if _, err := ProbeSession(sockPath); err == nil {
+				return nil
+			}
 		}
+
+		select {
+		case waitErr := <-waitCh:
+			return daemonStartupError(name, stderrPath, waitErr)
+		default:
+		}
+
+		if !time.Now().Before(deadline) {
+			break
+		}
+		time.Sleep(pollInterval)
+	}
+
+	// Deadline reached. Catch a last-moment exit before reporting a timeout.
+	select {
+	case waitErr := <-waitCh:
+		return daemonStartupError(name, stderrPath, waitErr)
+	default:
+	}
+
+	if msg := readDaemonStderr(stderrPath); msg != "" {
+		return fmt.Errorf("session %q: daemon did not become ready in time: %s", name, msg)
 	}
 	return fmt.Errorf("session %q: daemon did not start in time", name)
+}
+
+func daemonStartupError(name, stderrPath string, waitErr error) error {
+	msg := readDaemonStderr(stderrPath)
+	switch {
+	case msg != "" && waitErr != nil:
+		return fmt.Errorf("session %q: daemon exited (%v): %s", name, waitErr, msg)
+	case msg != "":
+		return fmt.Errorf("session %q: daemon exited before becoming ready: %s", name, msg)
+	case waitErr != nil:
+		return fmt.Errorf("session %q: daemon exited: %w", name, waitErr)
+	default:
+		return fmt.Errorf("session %q: daemon exited before becoming ready", name)
+	}
+}
+
+func readDaemonStderr(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func (d *Daemon) readPTY() {
