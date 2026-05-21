@@ -694,24 +694,78 @@ func TestDoctorReportMissingPkgConfig(t *testing.T) {
 	if !strings.Contains(report, "pkg-config: missing") {
 		t.Fatalf("report missing pkg-config error: %q", report)
 	}
-	if !strings.Contains(report, "libghostty-vt: loaded (pkg-config not found)") {
-		t.Fatalf("report missing libghostty-vt fallback status: %q", report)
+	// In a cgo build the doctor verifies libghostty-vt via dlsym, so the
+	// pkg-config absence is independent of the runtime backend status.
+	if !strings.Contains(report, "libghostty-vt: ok") {
+		t.Fatalf("report missing libghostty-vt status: %q", report)
 	}
 }
 
-func TestDetectGhosttyStatusLoadedWithoutPkgConfig(t *testing.T) {
+func TestDetectGhosttyStatusOK(t *testing.T) {
+	restoreDoctorFns := stubDoctorFns()
+	defer restoreDoctorFns()
+	doctorGhosttyMissingSymbol = func() string { return "" }
+
+	if got := detectGhosttyStatus("libghostty-vt", errors.New("not found")); got != "ok" {
+		t.Fatalf("detectGhosttyStatus() = %q, want \"ok\"", got)
+	}
+	if got := detectGhosttyStatus("libghostty-vt", nil); got != "ok" {
+		t.Fatalf("detectGhosttyStatus() = %q, want \"ok\"", got)
+	}
+}
+
+func TestDetectGhosttyStatusIncompatibleSymbols(t *testing.T) {
+	restoreDoctorFns := stubDoctorFns()
+	defer restoreDoctorFns()
+	doctorGhosttyMissingSymbol = func() string { return "ghostty_terminal_new" }
+
+	want := "incompatible (missing ghostty_terminal_new)"
+	if got := detectGhosttyStatus("libghostty-vt", nil); got != want {
+		t.Fatalf("detectGhosttyStatus() = %q, want %q", got, want)
+	}
+	if got := detectGhosttyStatus("libghostty-vt", errors.New("not found")); got != want {
+		t.Fatalf("detectGhosttyStatus() = %q, want %q", got, want)
+	}
+}
+
+func TestDetectGhosttyStatusStubBackend(t *testing.T) {
 	restoreDoctorFns := stubDoctorFns()
 	defer restoreDoctorFns()
 	doctorRunCommand = func(name string, args ...string) error { return errors.New("missing") }
 
-	if got := detectGhosttyStatus("libghostty-vt", errors.New("not found")); got != "loaded (pkg-config not found)" {
-		t.Fatalf("detectGhosttyStatus() = %q", got)
-	}
-	if got := detectGhosttyStatus("libghostty-vt", nil); got != "loaded (pkg-config not configured)" {
-		t.Fatalf("detectGhosttyStatus() = %q", got)
-	}
 	if got := detectGhosttyStatus("other", nil); got != "missing" {
-		t.Fatalf("detectGhosttyStatus() = %q", got)
+		t.Fatalf("detectGhosttyStatus() = %q, want \"missing\"", got)
+	}
+	if got := detectGhosttyStatus("other", errors.New("not found")); got != "pkg-config not found" {
+		t.Fatalf("detectGhosttyStatus() = %q, want \"pkg-config not found\"", got)
+	}
+
+	doctorRunCommand = func(name string, args ...string) error { return nil }
+	if got := detectGhosttyStatus("other", nil); got != "ok" {
+		t.Fatalf("detectGhosttyStatus() = %q, want \"ok\"", got)
+	}
+}
+
+func TestDoctorReportIncompatibleGhosttySymbols(t *testing.T) {
+	if session.RestoreBackendName() == "stub" {
+		t.Skip("requires cgo (libghostty-vt)")
+	}
+	socketDir := t.TempDir()
+	t.Setenv("TSM_DIR", socketDir)
+
+	restoreDoctorFns := stubDoctorFns()
+	defer restoreDoctorFns()
+	doctorExecutable = func() (string, error) { return "/tmp/tsm", nil }
+	doctorLookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
+	doctorGhosttyStatus = detectGhosttyStatus
+	doctorGhosttyMissingSymbol = func() string { return "ghostty_terminal_new" }
+
+	report, err := doctorReport(os.Getenv)
+	if err != nil {
+		t.Fatalf("doctorReport: %v", err)
+	}
+	if !strings.Contains(report, "libghostty-vt: incompatible (missing ghostty_terminal_new)") {
+		t.Fatalf("report missing incompatibility status: %q", report)
 	}
 }
 
@@ -895,6 +949,7 @@ func stubDoctorFns() func() {
 	prevProbe := doctorProbe
 	prevIsSocket := doctorIsSocket
 	prevGhosttyStatus := doctorGhosttyStatus
+	prevGhosttyMissingSymbol := doctorGhosttyMissingSymbol
 	prevCleanSocket := doctorCleanSocket
 	prevFetchPreview := debugFetchPreview
 
@@ -906,6 +961,7 @@ func stubDoctorFns() func() {
 		doctorProbe = prevProbe
 		doctorIsSocket = prevIsSocket
 		doctorGhosttyStatus = prevGhosttyStatus
+		doctorGhosttyMissingSymbol = prevGhosttyMissingSymbol
 		doctorCleanSocket = prevCleanSocket
 		debugFetchPreview = prevFetchPreview
 	}

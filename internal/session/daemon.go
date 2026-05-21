@@ -19,6 +19,11 @@ import (
 	"github.com/creack/pty/v2"
 )
 
+// daemonExecutable resolves the binary that SpawnDaemonInDir re-execs as the
+// daemon child. Tests override this to substitute a fake daemon that
+// simulates abnormal exits (e.g. dynamic-linker symbol lookup errors).
+var daemonExecutable = os.Executable
+
 // getForegroundPgrp returns the foreground process group of the PTY.
 func getForegroundPgrp(ptmx *os.File) (int, error) {
 	var pgrp int32
@@ -183,7 +188,7 @@ func SpawnDaemonInDir(name string, shellCmd []string, dir string) error {
 		os.Remove(sockPath)
 	}
 
-	exe, err := os.Executable()
+	exe, err := daemonExecutable()
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
 	}
@@ -231,6 +236,18 @@ func SpawnDaemonInDir(name string, shellCmd []string, dir string) error {
 	)
 	deadline := time.Now().Add(totalWait)
 
+	// Whenever the daemon dies before becoming ready, remove anything it
+	// left behind on disk. The daemon's own deferred cleanup does not run
+	// if it aborts from C code (e.g. a dynamic-linker symbol lookup error
+	// inside cgo init calls _exit(127) before Go's runtime can fire defers),
+	// which leaks the bound socket file. Without this, tsm doctor keeps
+	// reporting the failed session as `stale` until the user manually runs
+	// `tsm doctor clean-stale`.
+	fail := func(waitErr error) error {
+		_ = CleanStaleSocket(sockPath)
+		return daemonStartupError(name, stderrPath, waitErr)
+	}
+
 	for {
 		// A live, responsive daemon is the only success signal. IsSocket
 		// returns true as soon as net.Listen succeeds, even if the daemon
@@ -244,7 +261,7 @@ func SpawnDaemonInDir(name string, shellCmd []string, dir string) error {
 
 		select {
 		case waitErr := <-waitCh:
-			return daemonStartupError(name, stderrPath, waitErr)
+			return fail(waitErr)
 		default:
 		}
 
@@ -257,7 +274,7 @@ func SpawnDaemonInDir(name string, shellCmd []string, dir string) error {
 	// Deadline reached. Catch a last-moment exit before reporting a timeout.
 	select {
 	case waitErr := <-waitCh:
-		return daemonStartupError(name, stderrPath, waitErr)
+		return fail(waitErr)
 	default:
 	}
 

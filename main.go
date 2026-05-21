@@ -34,15 +34,16 @@ var (
 	date    = "unknown"
 	dirty   = "false"
 
-	doctorExecutable    = os.Executable
-	doctorLookPath      = exec.LookPath
-	doctorRunCommand    = runCommand
-	doctorReadDir       = os.ReadDir
-	doctorProbe         = session.ProbeSession
-	doctorIsSocket      = session.IsSocket
-	doctorGhosttyStatus = detectGhosttyStatus
-	doctorCleanSocket   = session.CleanStaleSocket
-	debugFetchPreview   = engine.FetchPreview
+	doctorExecutable           = os.Executable
+	doctorLookPath             = exec.LookPath
+	doctorRunCommand           = runCommand
+	doctorReadDir              = os.ReadDir
+	doctorProbe                = session.ProbeSession
+	doctorIsSocket             = session.IsSocket
+	doctorGhosttyStatus        = detectGhosttyStatus
+	doctorGhosttyMissingSymbol = session.MissingGhosttySymbol
+	doctorCleanSocket          = session.CleanStaleSocket
+	debugFetchPreview          = engine.FetchPreview
 )
 
 var errSessionPathNotSocket = errors.New("session path exists and is not a socket")
@@ -1752,17 +1753,23 @@ func cleanStaleArtifacts(cfg session.Config) ([]doctorArtifactStatus, error) {
 }
 
 func detectGhosttyStatus(backend string, pkgConfigErr error) string {
-	if pkgConfigErr != nil {
-		if backend == "libghostty-vt" {
-			return "loaded (pkg-config not found)"
+	// For the cgo (libghostty-vt) build, the only thing that truly matters is
+	// whether the loaded library exports the symbols tsm calls. pkg-config is
+	// a build-time signal — distros can ship a libghostty-vt.pc alongside a
+	// library that has drifted from the C ABI we were built against (Arch's
+	// ghostty 1.3.1 is the motivating example), and the doctor must surface
+	// that instead of falsely reporting "ok".
+	if backend == "libghostty-vt" {
+		if missing := doctorGhosttyMissingSymbol(); missing != "" {
+			return fmt.Sprintf("incompatible (missing %s)", missing)
 		}
+		return "ok"
+	}
+	if pkgConfigErr != nil {
 		return "pkg-config not found"
 	}
 	if doctorRunCommand("pkg-config", "--exists", "libghostty-vt") == nil {
 		return "ok"
-	}
-	if backend == "libghostty-vt" {
-		return "loaded (pkg-config not configured)"
 	}
 	return "missing"
 }
